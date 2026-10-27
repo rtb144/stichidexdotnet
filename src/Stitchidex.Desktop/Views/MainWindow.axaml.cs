@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Stitchidex.Desktop.ViewModels;
@@ -37,5 +38,24 @@ public partial class MainWindow : Window
         var sel = Vm.EffectiveSelection();
         if (sel.Count == 0) { Vm.StatusMessage = "Select patterns to send to USB."; return; }
         await new UsbExportDialog { DataContext = new UsbExportDialogViewModel(Vm.Usb, sel) }.ShowDialog(this);
+    }
+
+    void OnWindowKeyDown(object? s, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            if (Vm.IsScanning) Vm.CancelScanCommand.Execute(null);
+            else if (!string.IsNullOrEmpty(Vm.SearchText)) Vm.SearchText = "";
+            else if (GridList.SelectedItems?.Count > 1 && Vm.SelectedPattern is { } cur)
+            {
+                GridList.SelectedItems.Clear();
+                GridList.SelectedItem = cur;
+            }
+        }
+        else if (e.Key == Key.F2)
+        {
+            QuickTagBox?.Focus();
+            e.Handled = true;
+        }
     }
 }

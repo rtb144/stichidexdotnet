@@ -47,9 +47,13 @@ public partial class PatternItemViewModel : ObservableObject
     public IReadOnlyList<ThreadColor> Palette => _palette ??= LoadPalette();
     IReadOnlyList<ThreadColor> LoadPalette()
     {
-        if (Entry.PaletteHex.Count > 0) return Entry.PaletteHex.Select(h => ThreadColor.FromHex(h)).ToList();
-        try { return EmbroideryParserRegistry.ParseFile(Entry.Path).Colors; }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or UnauthorizedAccessException) { return Array.Empty<ThreadColor>(); }
+        try
+        {
+            var colors = EmbroideryParserRegistry.ParseFile(Entry.Path).Colors;
+            if (colors.Count > 0) return colors;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or UnauthorizedAccessException) { }
+        return Entry.PaletteHex.Select(h => ThreadColor.FromHex(h)).ToList();
     }
     public void Refresh(CatalogEntry e) { Entry = e; _thumb = null; _palette = null; OnPropertyChanged(string.Empty); }
 }
@@ -89,14 +93,15 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] string _selectedFormat = AllOption;
     [ObservableProperty] string _selectedHoop = AllOption;
     [ObservableProperty] string _selectedCraftTag = AllOption;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasSelection))] PatternItemViewModel? _selectedPattern;
+    CancellationTokenSource? _scanCts;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasSelection))] [NotifyPropertyChangedFor(nameof(TagSelectedLabel))] PatternItemViewModel? _selectedPattern;
     [ObservableProperty] string _newTagText = "";
     [ObservableProperty] string _notesText = "";
     [ObservableProperty] string _statusMessage = "Ready";
 
     public string SmartStatus => _smart.Status;
     public bool HasSelection => SelectedPattern != null;
-    public string TagSelectedLabel => $"🏷️ Tag Selected ({SelectedPatterns.Count})";
+    public string TagSelectedLabel => $"🏷️ Tag Selected ({EffectiveSelection().Count})";
     public SqliteCatalogService Catalog => _catalog;
 
     public static string DefaultDatabasePath()
@@ -188,7 +193,7 @@ public partial class MainWindowViewModel : ObservableObject
         var keep = SelectedPattern?.Id;
         Patterns.Clear();
         foreach (var e in items) Patterns.Add(new PatternItemViewModel(e));
-        if (keep != null) SelectedPattern = Patterns.FirstOrDefault(p => p.Id == keep);
+        SelectedPattern = (keep != null ? Patterns.FirstOrDefault(p => p.Id == keep) : null) ?? Patterns.FirstOrDefault();
         OnPropertyChanged(nameof(PatternsFoundText));
         OnPropertyChanged(nameof(SmartSearchPill));
         StatusMessage = $"{Patterns.Count} patterns";
@@ -197,16 +202,22 @@ public partial class MainWindowViewModel : ObservableObject
     public void AddFolder(string path) => _ = AddFolderAsync(path);
 
     /// <summary>Indexes a folder on a background thread; UI stays responsive and shows live progress.</summary>
+    [RelayCommand]
+    void CancelScan() => _scanCts?.Cancel();
+
     public async Task AddFolderAsync(string path)
     {
         if (!Folders.Contains(path)) Folders.Add(path);
+        _scanCts?.Dispose();
+        _scanCts = new CancellationTokenSource();
         IsScanning = true; ScanProgress = 0; ScanStatusText = $"Scanning {path}…";
         try
         {
-            var n = await _catalog.ScanDirectoryAsync(path, MakeProgress("Indexing"));
+            var n = await _catalog.ScanDirectoryAsync(path, MakeProgress("Indexing"), _scanCts.Token);
             StatusMessage = $"Indexed {n:N0} patterns from {path}";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { StatusMessage = "Scan failed: " + ex.Message; }
+        catch (OperationCanceledException) { StatusMessage = $"Scan canceled for {path}"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { StatusMessage = "Scan failed: " + ex.Message; }
         finally { IsScanning = false; ScanStatusText = ""; }
         Reload();
     }
