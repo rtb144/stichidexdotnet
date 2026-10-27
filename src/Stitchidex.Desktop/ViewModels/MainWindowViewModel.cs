@@ -21,22 +21,54 @@ public partial class PatternItemViewModel : ObservableObject
     public int StitchCount => Entry.StitchCount;
     public string StitchBadge => $"{Entry.StitchCount:N0} st";
     public string SizeText => $"{Entry.WidthMm:0.#} × {Entry.HeightMm:0.#} mm";
+    public string SizeInText => $"{Entry.WidthMm / 25.4:0.00} × {Entry.HeightMm / 25.4:0.00} in";
+    public string CardSubtitle => $"{Entry.WidthMm:0}×{Entry.HeightMm:0} mm • {Entry.StitchCount:N0} sts";
+    public string HoopPill => HoopShort(Entry.HoopCategory);
+    public bool IsSmallHoop => Entry.HoopCategory.StartsWith("100x100");
+    public bool IsLargeHoop => !IsSmallHoop;
+    public string FileName => Path.GetFileName(Entry.Path);
+    public int ColorCount => Entry.ColorCount;
+    public string ColorsFormatBadge => $"{Entry.ColorCount} colors • .{FormatBadge}";
+    public string JumpsTrimsBadge => $"{Entry.JumpCount:N0} jumps / {Entry.TrimCount:N0} trims";
+    public string SizeBothText => $"{SizeText} ({SizeInText})";
+    public string HoopFitBadge => $"Hoop fit: {Entry.HoopCategory}";
+    public IReadOnlyList<string> ThreadDots => Entry.PaletteHex.Take(8).ToList();
+    static string HoopShort(string h)
+    {
+        var i = h.IndexOf('(');
+        return i >= 0 && h.EndsWith(")") ? h[(i + 1)..^1] : h;
+    }
     public string Path_ => Entry.Path;
     public IReadOnlyList<string> Tags => Entry.Tags;
     [ObservableProperty] bool _isSelected;
     Bitmap? _thumb;
     public Bitmap? Thumbnail => _thumb ??= Entry.Thumbnail is { Length: > 0 } b ? new Bitmap(new MemoryStream(b)) : null;
-    public IReadOnlyList<ThreadColor> Palette
+    IReadOnlyList<ThreadColor>? _palette;
+    public IReadOnlyList<ThreadColor> Palette => _palette ??= LoadPalette();
+    IReadOnlyList<ThreadColor> LoadPalette()
     {
-        get { try { return EmbroideryParserRegistry.ParseFile(Entry.Path).Colors; } catch { return Array.Empty<ThreadColor>(); } }
+        if (Entry.PaletteHex.Count > 0) return Entry.PaletteHex.Select(h => ThreadColor.FromHex(h)).ToList();
+        try { return EmbroideryParserRegistry.ParseFile(Entry.Path).Colors; }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or UnauthorizedAccessException) { return Array.Empty<ThreadColor>(); }
     }
-    public void Refresh(CatalogEntry e) { Entry = e; OnPropertyChanged(string.Empty); }
+    public void Refresh(CatalogEntry e) { Entry = e; _thumb = null; _palette = null; OnPropertyChanged(string.Empty); }
 }
 
 public partial class MainWindowViewModel : ObservableObject
 {
     public const string AllOption = "All";
-    public static readonly string[] Themes = { "Dark Stitch Studio", "Warm Linen Light" };
+    public static readonly string[] Themes = { "Craft Studio Dark", "Warm Atelier Light" };
+    public static readonly string[] PreviewBackgrounds = { "Dark Slate #2D3748", "Warm Linen #F5F0E6", "Pure White #FFFFFF", "Midnight #0F172A" };
+    public IReadOnlyList<string> PreviewBackgroundOptions => PreviewBackgrounds;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(PreviewBackgroundHex))] string _selectedPreviewBackground = PreviewBackgrounds[0];
+    public string PreviewBackgroundHex => SelectedPreviewBackground[SelectedPreviewBackground.LastIndexOf('#')..];
+    [ObservableProperty] bool _isScanning;
+    [ObservableProperty] double _scanProgress;
+    [ObservableProperty] string _scanStatusText = "";
+    [ObservableProperty] string _maxStitchesText = "";
+    [ObservableProperty] string _maxColorsText = "";
+    public string PatternsFoundText => $"{Patterns.Count} patterns found";
+    public string SmartSearchPill => SmartSearchEnabled ? $"Smart Search: ON ({_smart.Status})" : "Smart Search: OFF";
     readonly SqliteCatalogService _catalog;
     readonly HybridSmartSearchService _smart;
     public UsbExportService Usb { get; } = new();
@@ -82,10 +114,47 @@ public partial class MainWindowViewModel : ObservableObject
         SelectedPatterns.CollectionChanged += (_, _) => OnPropertyChanged(nameof(TagSelectedLabel));
         foreach (var f in _catalog.All().Select(e => Path.GetDirectoryName(e.Path) ?? "").Distinct().OrderBy(x => x)) Folders.Add(f);
         Reload();
+        _ = RepairThumbnailsAsync();
+    }
+
+    partial void OnMaxStitchesTextChanged(string value) => Reload();
+    partial void OnMaxColorsTextChanged(string value) => Reload();
+
+    [RelayCommand]
+    void ResetFilters()
+    {
+        SelectedFormat = AllOption; SelectedHoop = AllOption; SelectedCraftTag = AllOption;
+        MaxStitchesText = ""; MaxColorsText = ""; SelectedFolder = null; SearchText = "";
+    }
+
+    IProgress<(int Done, int Total, string FileName)> MakeProgress(string verb) =>
+        new Progress<(int Done, int Total, string FileName)>(t =>
+        {
+            ScanProgress = t.Total == 0 ? 100 : 100.0 * t.Done / t.Total;
+            ScanStatusText = $"{verb} {t.Done:N0}/{t.Total:N0} {t.FileName}";
+        });
+
+    async Task RepairThumbnailsAsync()
+    {
+        if (IsScanning) return;
+        IsScanning = true;
+        try
+        {
+            var n = await _catalog.RepairMissingThumbnailsAsync(MakeProgress("Rendering previews"));
+            if (n > 0) { StatusMessage = $"Rendered {n} missing previews"; Reload(); }
+        }
+        catch (Exception ex) { StatusMessage = "Preview repair failed: " + ex.Message; }
+        finally { IsScanning = false; ScanStatusText = ""; }
+    }
+
+    [RelayCommand]
+    async Task RescanAll()
+    {
+        foreach (var f in Folders.ToList()) await AddFolderAsync(f);
     }
 
     partial void OnSearchTextChanged(string value) => Reload();
-    partial void OnSmartSearchEnabledChanged(bool value) => Reload();
+    partial void OnSmartSearchEnabledChanged(bool value) { OnPropertyChanged(nameof(SmartSearchPill)); Reload(); }
     partial void OnSelectedFormatChanged(string value) => Reload();
     partial void OnSelectedHoopChanged(string value) => Reload();
     partial void OnSelectedCraftTagChanged(string value) => Reload();
@@ -114,16 +183,31 @@ public partial class MainWindowViewModel : ObservableObject
         if (SelectedFormat != AllOption) items = items.Where(e => e.FormatFamily == SelectedFormat);
         if (SelectedHoop != AllOption) items = items.Where(e => e.HoopCategory == SelectedHoop);
         if (SelectedCraftTag != AllOption) items = items.Where(e => e.Tags.Contains(SelectedCraftTag));
+        if (int.TryParse(MaxStitchesText.Replace(",", ""), out var ms) && ms > 0) items = items.Where(e => e.StitchCount <= ms);
+        if (int.TryParse(MaxColorsText, out var mc) && mc > 0) items = items.Where(e => e.ColorCount <= mc);
+        var keep = SelectedPattern?.Id;
         Patterns.Clear();
         foreach (var e in items) Patterns.Add(new PatternItemViewModel(e));
+        if (keep != null) SelectedPattern = Patterns.FirstOrDefault(p => p.Id == keep);
+        OnPropertyChanged(nameof(PatternsFoundText));
+        OnPropertyChanged(nameof(SmartSearchPill));
         StatusMessage = $"{Patterns.Count} patterns";
     }
 
-    public void AddFolder(string path)
+    public void AddFolder(string path) => _ = AddFolderAsync(path);
+
+    /// <summary>Indexes a folder on a background thread; UI stays responsive and shows live progress.</summary>
+    public async Task AddFolderAsync(string path)
     {
-        var n = _catalog.ScanDirectory(path);
         if (!Folders.Contains(path)) Folders.Add(path);
-        StatusMessage = $"Indexed {n} patterns from {path}";
+        IsScanning = true; ScanProgress = 0; ScanStatusText = $"Scanning {path}…";
+        try
+        {
+            var n = await _catalog.ScanDirectoryAsync(path, MakeProgress("Indexing"));
+            StatusMessage = $"Indexed {n:N0} patterns from {path}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { StatusMessage = "Scan failed: " + ex.Message; }
+        finally { IsScanning = false; ScanStatusText = ""; }
         Reload();
     }
 

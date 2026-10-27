@@ -12,7 +12,7 @@ public partial class MainWindow : Window
     async void OnAddFolder(object? s, RoutedEventArgs e)
     {
         var r = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Add embroidery folder", AllowMultiple = false });
-        if (r.Count > 0 && r[0].TryGetLocalPath() is { } p) Vm.AddFolder(p);
+        if (r.Count > 0 && r[0].TryGetLocalPath() is { } p) await Vm.AddFolderAsync(p);
     }
 
     void SyncSelection(System.Collections.IList items)

@@ -7,12 +7,20 @@ using Stitchidex.Core.Rendering;
 namespace Stitchidex.Core.Services;
 
 public sealed record CatalogEntry(long Id, string Path, string Title, string FormatFamily, int StitchCount, int ColorCount,
-    double WidthMm, double HeightMm, string HoopCategory, string SemanticCard, IReadOnlyList<string> Tags, string Notes, byte[]? Thumbnail);
+    double WidthMm, double HeightMm, string HoopCategory, string SemanticCard, IReadOnlyList<string> Tags, string Notes, byte[]? Thumbnail)
+{
+    /// <summary>Thread palette as #RRGGBB hex codes (cached at scan time so cards never re-parse files).</summary>
+    public IReadOnlyList<string> PaletteHex { get; init; } = Array.Empty<string>();
+    public int JumpCount { get; init; }
+    public int TrimCount { get; init; }
+}
 
 public sealed class SqliteCatalogService : IDisposable
 {
     static readonly HashSet<string> SkipExts = new(StringComparer.OrdinalIgnoreCase) { ".py", ".toml", ".txt", ".csv", ".json", ".md", ".edr", ".col", ".inf", ".png", ".jpg" };
     readonly SqliteConnection _db;
+    readonly object _gate = new();
+    SqliteTransaction? _tx;
     public string DatabasePath { get; }
 
     public SqliteCatalogService(string dbPath)
@@ -27,14 +35,32 @@ public sealed class SqliteCatalogService : IDisposable
             thumbnail BLOB, semantic_card TEXT, tags TEXT DEFAULT '[]', notes TEXT DEFAULT '');
           CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(title, semantic_card, tags, content='patterns', content_rowid='id');
           CREATE TABLE IF NOT EXISTS embeddings(pattern_id INTEGER PRIMARY KEY, model TEXT, dim INTEGER, vector BLOB);");
+        foreach (var col in new[] { "palette TEXT", "jump_count INTEGER DEFAULT 0", "trim_count INTEGER DEFAULT 0" })
+            try { Exec("ALTER TABLE patterns ADD COLUMN " + col); } catch (SqliteException) { }
         PurgeNonPatternRecords();
     }
 
     int Exec(string sql, params (string, object?)[] ps)
     {
-        using var c = _db.CreateCommand(); c.CommandText = sql;
+        lock (_gate)
+        {
+        using var c = _db.CreateCommand(); c.CommandText = sql; c.Transaction = _tx;
         foreach (var (k, v) in ps) c.Parameters.AddWithValue(k, v ?? DBNull.Value);
         return c.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Runs <paramref name="body"/> inside one SQLite transaction (thread-safe, reentrant on same thread).</summary>
+    void InTransaction(Action body)
+    {
+        lock (_gate)
+        {
+            if (_tx != null) { body(); return; }
+            _tx = _db.BeginTransaction();
+            try { body(); _tx.Commit(); }
+            catch { _tx.Rollback(); throw; }
+            finally { _tx.Dispose(); _tx = null; }
+        }
     }
 
     void ReindexFts() => Exec("INSERT INTO patterns_fts(patterns_fts) VALUES('rebuild');");
@@ -47,28 +73,74 @@ public sealed class SqliteCatalogService : IDisposable
         return bad.Count;
     }
 
-    public int ScanDirectory(string folder, bool renderThumbnails = true)
+    public static bool IsPatternFile(string f)
     {
-        int n = 0;
-        foreach (var f in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
-        {
-            var ext = System.IO.Path.GetExtension(f);
-            if (SkipExts.Contains(ext) || !EmbroideryParserRegistry.IsEmbroideryExtension(ext)) continue;
-            EmbroideryPattern p;
-            try { p = EmbroideryParserRegistry.ParseFile(f); } catch { continue; }
-            if (renderThumbnails && p.Stitches.Count > 0) p.PngThumbnail = ThumbnailRenderer.RenderThumbnailPng(p);
-            Upsert(p); n++;
-        }
-        ReindexFts();
-        return n;
+        var ext = System.IO.Path.GetExtension(f);
+        return !SkipExts.Contains(ext) && EmbroideryParserRegistry.IsEmbroideryExtension(ext);
     }
 
-    public void Upsert(EmbroideryPattern p) => Exec(@"INSERT INTO patterns(path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags)
-        VALUES($p,$t,$f,$s,$c,$w,$h,$hc,$th,$sc,$tg)
-        ON CONFLICT(path) DO UPDATE SET title=$t,format_family=$f,stitch_count=$s,color_count=$c,width_mm=$w,height_mm=$h,hoop_category=$hc,thumbnail=$th,semantic_card=$sc",
+    static EmbroideryPattern? ParseAndRender(string f, bool render)
+    {
+        try
+        {
+            var p = EmbroideryParserRegistry.ParseFile(f);
+            if (render && p.StitchCount > 0) p.PngThumbnail = ThumbnailRenderer.RenderThumbnailPng(p);
+            return p;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or IndexOutOfRangeException or ArgumentException or UnauthorizedAccessException) { return null; }
+    }
+
+    public int ScanDirectory(string folder, bool renderThumbnails = true) =>
+        ScanDirectoryAsync(folder, null, default, renderThumbnails).GetAwaiter().GetResult();
+
+    /// <summary>Background scan: enumerates first (Total known), parses + renders in parallel, writes in batched transactions.</summary>
+    public Task<int> ScanDirectoryAsync(string folder, IProgress<(int Done, int Total, string FileName)>? progress = null,
+        CancellationToken ct = default, bool renderThumbnails = true) => Task.Run(() =>
+    {
+        var files = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Where(IsPatternFile).ToList();
+        return IndexFiles(files, progress, ct, renderThumbnails);
+    }, ct);
+
+    int IndexFiles(IReadOnlyList<string> files, IProgress<(int Done, int Total, string FileName)>? progress, CancellationToken ct, bool render)
+    {
+        int total = files.Count, done = 0, indexed = 0;
+        progress?.Report((0, total, ""));
+        const int Chunk = 64;
+        var opts = new ParallelOptions { CancellationToken = ct, MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) };
+        for (int i = 0; i < total; i += Chunk)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = files.Skip(i).Take(Chunk).ToList();
+            var parsed = new EmbroideryPattern?[batch.Count];
+            Parallel.For(0, batch.Count, opts, k =>
+            {
+                parsed[k] = ParseAndRender(batch[k], render);
+                var d = Interlocked.Increment(ref done);
+                if (d % Math.Max(1, total / 200) == 0) progress?.Report((d, total, System.IO.Path.GetFileName(batch[k]))); // throttled: never floods the UI thread
+            });
+            InTransaction(() => { foreach (var p in parsed) if (p != null) { Upsert(p); indexed++; } });
+        }
+        ReindexFts();
+        progress?.Report((total, total, ""));
+        return indexed;
+    }
+
+    /// <summary>Re-parse and render any catalog rows whose thumbnail BLOB is NULL/empty (e.g. from older parser versions).</summary>
+    public Task<int> RepairMissingThumbnailsAsync(IProgress<(int Done, int Total, string FileName)>? progress = null, CancellationToken ct = default) =>
+        Task.Run(() =>
+        {
+            var files = Query("SELECT * FROM patterns WHERE palette IS NULL OR ((thumbnail IS NULL OR length(thumbnail)=0) AND stitch_count > 0)")
+                .Select(e => e.Path).Where(File.Exists).ToList();
+            return files.Count == 0 ? 0 : IndexFiles(files, progress, ct, true);
+        }, ct);
+
+    public void Upsert(EmbroideryPattern p) => Exec(@"INSERT INTO patterns(path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags,palette,jump_count,trim_count)
+        VALUES($p,$t,$f,$s,$c,$w,$h,$hc,$th,$sc,$tg,$pl,$j,$tr)
+        ON CONFLICT(path) DO UPDATE SET title=$t,format_family=$f,stitch_count=$s,color_count=$c,width_mm=$w,height_mm=$h,hoop_category=$hc,thumbnail=$th,semantic_card=$sc,palette=$pl,jump_count=$j,trim_count=$tr",
         ("$p", System.IO.Path.GetFullPath(p.FilePath)), ("$t", p.Title), ("$f", p.FormatFamily), ("$s", p.StitchCount), ("$c", p.Colors.Count),
         ("$w", p.WidthMm), ("$h", p.HeightMm), ("$hc", p.HoopCategory), ("$th", p.PngThumbnail), ("$sc", p.SemanticCard),
-        ("$tg", JsonSerializer.Serialize(p.Tags.Where(t => !t.Contains(':')).ToList())));
+        ("$tg", JsonSerializer.Serialize(p.Tags.Where(t => !t.Contains(':')).ToList())),
+        ("$pl", JsonSerializer.Serialize(p.Colors.Select(c => c.Hex).ToList())), ("$j", p.JumpCount), ("$tr", p.TrimCount));
 
     public int RemoveDirectoryRecords(string folder)
     {
@@ -109,17 +181,15 @@ public sealed class SqliteCatalogService : IDisposable
     public void BulkAddTags(IEnumerable<long> ids, IEnumerable<string> tags)
     {
         var add = tags.Select(Norm).Where(t => t.Length > 0).ToList();
-        using var tx = _db.BeginTransaction();
-        foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Concat(add));
-        tx.Commit(); ReindexFts();
+        InTransaction(() => { foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Concat(add)); });
+        ReindexFts();
     }
 
     public void BulkRemoveTags(IEnumerable<long> ids, IEnumerable<string> tags)
     {
         var rm = new HashSet<string>(tags.Select(Norm));
-        using var tx = _db.BeginTransaction();
-        foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Where(t => !rm.Contains(t)));
-        tx.Commit(); ReindexFts();
+        InTransaction(() => { foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Where(t => !rm.Contains(t))); });
+        ReindexFts();
     }
 
     public void SetNotes(long id, string notes) => Exec("UPDATE patterns SET notes=$n WHERE id=$i", ("$n", notes), ("$i", id));
@@ -131,13 +201,16 @@ public sealed class SqliteCatalogService : IDisposable
     {
         var terms = Regex.Matches(query, @"[\p{L}\p{N}]+").Select(m => "\"" + m.Value + "\"*").ToList();
         if (terms.Count == 0) return Array.Empty<(long, double)>();
-        using var c = _db.CreateCommand();
+        lock (_gate)
+        {
+        using var c = _db.CreateCommand(); c.Transaction = _tx;
         c.CommandText = "SELECT rowid, bm25(patterns_fts) FROM patterns_fts WHERE patterns_fts MATCH $q ORDER BY 2 LIMIT $l";
         c.Parameters.AddWithValue("$q", string.Join(" OR ", terms)); c.Parameters.AddWithValue("$l", limit);
         var r = new List<(long, double)>();
         using var rd = c.ExecuteReader();
         while (rd.Read()) r.Add((rd.GetInt64(0), rd.GetDouble(1)));
         return r;
+        }
     }
 
     public IReadOnlyList<CatalogEntry> Search(string query) =>
@@ -151,16 +224,24 @@ public sealed class SqliteCatalogService : IDisposable
 
     public float[]? GetEmbedding(long id, string model)
     {
-        using var c = _db.CreateCommand();
+        lock (_gate)
+        {
+        using var c = _db.CreateCommand(); c.Transaction = _tx;
         c.CommandText = "SELECT vector FROM embeddings WHERE pattern_id=$i AND model=$m";
         c.Parameters.AddWithValue("$i", id); c.Parameters.AddWithValue("$m", model);
         if (c.ExecuteScalar() is not byte[] b) return null;
         var v = new float[b.Length / 4]; Buffer.BlockCopy(b, 0, v, 0, b.Length); return v;
+        }
     }
 
     IReadOnlyList<CatalogEntry> Query(string sql, params (string, object?)[] ps)
     {
-        using var c = _db.CreateCommand(); c.CommandText = sql;
+        lock (_gate) return QueryCore(sql, ps);
+    }
+
+    IReadOnlyList<CatalogEntry> QueryCore(string sql, (string, object?)[] ps)
+    {
+        using var c = _db.CreateCommand(); c.CommandText = sql; c.Transaction = _tx;
         foreach (var (k, v) in ps) c.Parameters.AddWithValue(k, v ?? DBNull.Value);
         var list = new List<CatalogEntry>();
         using var r = c.ExecuteReader();
@@ -172,9 +253,20 @@ public sealed class SqliteCatalogService : IDisposable
             list.Add(new CatalogEntry(r.GetInt64(r.GetOrdinal("id")), S("path"), S("title"), S("format_family"),
                 r["stitch_count"] is long sc ? (int)sc : 0, r["color_count"] is long cc ? (int)cc : 0,
                 r["width_mm"] is double w ? w : 0, r["height_mm"] is double h ? h : 0, S("hoop_category"), S("semantic_card"),
-                tags, S("notes"), r["thumbnail"] as byte[]));
+                tags, S("notes"), r["thumbnail"] as byte[])
+            {
+                PaletteHex = ReadList(S("palette")),
+                JumpCount = r["jump_count"] is long jc ? (int)jc : 0,
+                TrimCount = r["trim_count"] is long tc ? (int)tc : 0,
+            });
         }
         return list;
+    }
+
+    static List<string> ReadList(string json)
+    {
+        if (string.IsNullOrEmpty(json)) return new();
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new(); } catch (JsonException) { return new(); }
     }
 
     public void Dispose() => _db.Dispose();

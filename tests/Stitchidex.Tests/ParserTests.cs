@@ -106,11 +106,11 @@ public class ParserTests
         var d = new byte[] { 10, 0, 0x80, 0x04, 20, 0, 0x80, 0x01, 0, 0, 0xF6, 0xF6, 0x80, 0x80, 5, 5 };
         var p = new ExpParser().Parse(new MemoryStream(d), "a.exp");
         Assert.Equal(2, p.StitchCount);
-        Assert.Equal(2, p.JumpCount);
+        Assert.Equal(1, p.JumpCount); // pyembroidery: colour change with (0,0) adds no move
         Assert.Equal(1, p.TrimCount);
         Assert.Equal(1, p.ColorChangeCount);
-        var s = p.Stitches.First(x => x.Command == EmbroideryCommand.Trim);
-        Assert.Equal((25.0, 5.0), (s.X, s.Y));
+        var s = p.Stitches.First(x => x.Command == EmbroideryCommand.Trim); // pyembroidery: trim ignores its dx/dy
+        Assert.Equal((20.0, 10.0), (s.X, s.Y));
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class ParserTests
         BitConverter.GetBytes(6).CopyTo(hdr, 0x78);
         var st = new byte[] { 0, 0, 100, 0, 0x80, 0x01, 0, 0, 0, 100, 0x80, 0x02, 10, 10, 0x80, 0x10 };
         var p = new JefParser().Parse(new MemoryStream(hdr.Concat(st).ToArray()), "j.jef");
-        Assert.Equal(new[] { "Red", "Blue" }, p.Colors.Select(c => c.Name));
+        Assert.Equal(new[] { "Baby Blue", "Green" }, p.Colors.Select(c => c.Name)); // full 80-entry pyembroidery Janome palette
         Assert.Equal(3, p.StitchCount);
         Assert.Equal(1, p.ColorChangeCount);
         Assert.Equal(10.0, p.WidthMm);
