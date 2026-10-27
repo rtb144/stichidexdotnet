@@ -37,6 +37,8 @@ cp -f "$OUT/stichidexdotnet.exe" "$OUT/Stitchidex.exe"
 # Bundle bge-base-en-v1.5 for 100% offline neural search.
 bash "$ROOT/packaging/fetch_model.sh" "$OUT/models/bge-base-en-v1.5"
 cp -f "$ROOT/docs/Stitchidex-Windows-User-Guide.html" "$OUT/User-Guide.html"
+cp -f "$ROOT/src/Stitchidex.Desktop/Assets/stitchidex.ico" "$OUT/stitchidex.ico"
+cp -f "$ROOT/LICENSE" "$OUT/LICENSE.txt"; cp -f "$ROOT/THIRD-PARTY-NOTICES.md" "$OUT/"
 
 ISS_FILE="$OUT/stichidexdotnet.iss"
 cat > "$ISS_FILE" <<ISS
@@ -52,12 +54,18 @@ OutputBaseFilename=StichidexDotNet-Setup-${VERSION}-win64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
+LicenseFile=C:\StichidexDotNet\LICENSE.txt
+SetupIconFile=C:\StichidexDotNet\stitchidex.ico
+UninstallDisplayIcon={app}\stichidexdotnet.exe
 
 [Files]
 Source: "C:\StichidexDotNet\stichidexdotnet.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\StichidexDotNet\stitchidexdotnet.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "C:\StichidexDotNet\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "C:\StichidexDotNet\User-Guide.html"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\StichidexDotNet\stitchidex.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\StichidexDotNet\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\StichidexDotNet\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\StichidexDotNet\models\*"; DestDir: "{app}\models"; Flags: recursesubdirs ignoreversion
 Source: "C:\StichidexDotNet\samples\*"; DestDir: "{app}\samples"; Flags: recursesubdirs ignoreversion skipifsourcedoesntexist
 
@@ -152,7 +160,7 @@ cp -f "$OUT/stitchidexdotnet.exe" "$OUT/build_installer_windows.bat" "$VM_SHARED
 cp -rf "$OUT/models" "$VM_SHARED/"
 cp -f "$ZIP" "$VM_SHARED/"
 [ -f "$SETUP" ] && cp -f "$SETUP" "$VM_SHARED/"
-cp -f "$OUT/User-Guide.html" "$VM_SHARED/"
+cp -f "$OUT/User-Guide.html" "$OUT/stitchidex.ico" "$VM_SHARED/"
 cp -f "$OUT/stichidexdotnet.exe" "$VM_SHARED/stichidexdotnet.exe"
 cp -f "$OUT/stichidexdotnet.iss" "$VM_SHARED/stichidexdotnet.iss"
 cp -f "$OUT/install_and_run_dotnet.bat" "$VM_SHARED/install_and_run_dotnet.bat"

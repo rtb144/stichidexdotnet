@@ -1,5 +1,9 @@
 # Troubleshooting & FAQ
 
+![Your whole pattern collection at a glance, with a large preview on the right](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/01-studio-catalog-dark.png)
+*Your whole pattern collection at a glance, with a large preview on the right*
+
+
 ## 7. Helpful Tips & Troubleshooting
 
 **My patterns don't appear.**

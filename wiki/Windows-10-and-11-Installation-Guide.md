@@ -1,5 +1,9 @@
 # Installing on Windows 10 & 11
 
+![Your whole pattern collection at a glance, with a large preview on the right](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/01-studio-catalog-dark.png)
+*Your whole pattern collection at a glance, with a large preview on the right*
+
+
 ## 2. Installing Stitchidex
 
 1. Download **StichidexDotNet-Setup-0.5.0-win64.exe** (the download link is on the Stitchidex web page).

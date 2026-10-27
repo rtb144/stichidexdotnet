@@ -1,5 +1,15 @@
 # Searching, Tagging & Organizing
 
+![Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/02-smart-search-and-spellcheck.png)
+*Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"*
+
+![The bright Warm Atelier Light theme](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/03-warm-atelier-light-theme.png)
+*The bright Warm Atelier Light theme*
+
+![Tagging three selected patterns at once](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/04-inspector-and-bulk-tagging.png)
+*Tagging three selected patterns at once*
+
+
 ## 4. Finding the Perfect Pattern (Smart Search & Filters)
 
 ### Searching with everyday words

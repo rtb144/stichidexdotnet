@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#312E81"/><stop offset="1" stop-color="#1E1B4B"/></linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBBF24"/><stop offset="1" stop-color="#D97706"/></linearGradient>
+    <radialGradient id="fab" cx="0.5" cy="0.45" r="0.6"><stop offset="0" stop-color="#FFF7ED"/><stop offset="1" stop-color="#FDE7C7"/></radialGradient>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="98" fill="none" stroke="#E8B4A0" stroke-width="4" opacity="0.7"/>
+  <!-- brass clasp -->
+  <rect x="226" y="52" width="60" height="40" rx="10" fill="#B45309"/>
+  <rect x="240" y="40" width="32" height="22" rx="6" fill="#FCD34D"/>
+  <!-- hoop -->
+  <circle cx="256" cy="272" r="178" fill="url(#wood)"/>
+  <circle cx="256" cy="272" r="150" fill="url(#fab)"/>
+  <circle cx="256" cy="272" r="164" fill="none" stroke="#92400E" stroke-width="4" opacity="0.5"/>
+  <!-- stitched heart -->
+  <path d="M256 372 C 180 318 156 284 156 248 C 156 214 182 194 210 194 C 232 194 248 208 256 226 C 264 208 280 194 302 194 C 330 194 356 214 356 248 C 356 284 332 318 256 372 Z" fill="#F43F5E"/>
+  <path d="M256 352 C 192 306 174 278 174 249 C 174 224 194 210 212 210 C 232 210 246 224 256 246 C 266 224 280 210 300 210 C 318 210 338 224 338 249 C 338 278 320 306 256 352 Z" fill="none" stroke="#FFF7ED" stroke-width="5" stroke-dasharray="12 9" stroke-linecap="round"/>
+  <!-- thread arcs -->
+  <path d="M120 300 Q 256 420 392 300" fill="none" stroke="#14B8A6" stroke-width="10" stroke-linecap="round" stroke-dasharray="22 12"/>
+  <path d="M132 220 Q 256 120 380 220" fill="none" stroke="#A855F7" stroke-width="8" stroke-linecap="round" stroke-dasharray="18 12"/>
+  <!-- needle -->
+  <line x1="350" y1="150" x2="440" y2="60" stroke="#E5E7EB" stroke-width="10" stroke-linecap="round"/>
+  <ellipse cx="430" cy="70" rx="5" ry="12" transform="rotate(45 430 70)" fill="#1E1B4B"/>
+  <path d="M432 68 C 470 100 470 150 430 170" fill="none" stroke="#FBBF24" stroke-width="5" stroke-linecap="round"/>
+</svg>

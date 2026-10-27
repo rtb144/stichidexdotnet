@@ -10,6 +10,8 @@
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <ApplicationIcon>Assets\stitchidex.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />
@@ -23,6 +25,9 @@
     <ProjectReference Include="..\Stitchidex.Core\Stitchidex.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <None Include="..\..\LICENSE;..\..\THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="Assets\stitchidex.ico;Assets\stitchidex-icon.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="..\..\samples\**\*" Link="samples\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 </Project>

@@ -125,3 +125,17 @@ public class SpellCheckTests : IDisposable
         Assert.Equal("winter", s.Suggest("wintar").CorrectedQuery);
     }
 }
+
+public class BrandingTests
+{
+    static string Root() { var d = AppContext.BaseDirectory; while (!File.Exists(Path.Combine(d, "StitchidexDotNet.sln"))) d = Path.GetDirectoryName(d)!; return d; }
+    [Fact]
+    public void IconAssetsExist()
+    {
+        var ico = Path.Combine(Root(), "src/Stitchidex.Desktop/Assets/stitchidex.ico");
+        var b = File.ReadAllBytes(ico);
+        Assert.True(b[0] == 0 && b[2] == 1 && BitConverter.ToUInt16(b, 4) >= 6); // ICO header, >= 6 frames
+        Assert.True(File.Exists(Path.Combine(Root(), "src/Stitchidex.Desktop/Assets/stitchidex-icon.png")));
+        Assert.Contains("<svg", File.ReadAllText(Path.Combine(Root(), "assets/stitchidex-logo.svg")));
+    }
+}

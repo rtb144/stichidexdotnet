@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tom Butler and Stitchidex Contributors
+// Embroidery binary format decoding (PES/PEC, DST, EXP, JEF, XXX, VP3, HUS…) and thread tables are ported from
+// pyembroidery (https://github.com/EmbroidePy/pyembroidery), Copyright (c) 2018 Tatarize, MIT License.
+// See LICENSE and THIRD-PARTY-NOTICES.md.
 using System.Text;
 using System.Text.RegularExpressions;
 using Stitchidex.Core.Models;

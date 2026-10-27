@@ -39,11 +39,18 @@ Maintainer: Stitchidex <noreply@stitchidex.local>
 Description: Stitchidex embroidery pattern catalog (.NET 8 / Avalonia side-by-side edition)
 CTL
 
+for n in 256 512; do mkdir -p "$PKG/usr/share/icons/hicolor/${n}x${n}/apps"; done
+mkdir -p "$PKG/usr/share/pixmaps" "$PKG/usr/share/doc/$PKG_NAME"
+{ cat "$ROOT/LICENSE"; echo; cat "$ROOT/THIRD-PARTY-NOTICES.md"; } > "$PKG/usr/share/doc/$PKG_NAME/copyright"
+cp "$ROOT/assets/stitchidex-icon-256.png" "$PKG/usr/share/icons/hicolor/256x256/apps/${PKG_NAME}.png"
+cp "$ROOT/assets/stitchidex-logo.png" "$PKG/usr/share/icons/hicolor/512x512/apps/${PKG_NAME}.png"
+cp "$ROOT/assets/stitchidex-logo.png" "$PKG/usr/share/pixmaps/${PKG_NAME}.png"
 cat > "$PKG/usr/share/applications/${PKG_NAME}.desktop" <<DSK
 [Desktop Entry]
 Name=Stitchidex (.NET)
 Exec=/opt/${PKG_NAME}/stichidexdotnet
 Type=Application
+Icon=${PKG_NAME}
 Categories=Graphics;
 DSK
 

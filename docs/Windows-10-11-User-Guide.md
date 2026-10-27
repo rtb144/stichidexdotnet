@@ -1,3 +1,5 @@
+<p align="center"><img src="../assets/stitchidex-logo.png" width="140" alt="Stitchidex logo"></p>
+
 # Stitchidex — Your Embroidery Pattern Companion
 ## Getting Started Guide for Windows 10 & Windows 11
 
@@ -31,6 +33,10 @@ Everything happens on your own computer. You don't need internet or an account, 
 
 ---
 
+
+![Your whole pattern collection at a glance, with a large preview on the right](../assets/screenshots/01-studio-catalog-dark.png)
+*Your whole pattern collection at a glance, with a large preview on the right*
+
 ## 3. Adding Your Pattern Folders
 
 1. Click the **+ Add Folder** button.
@@ -57,6 +63,10 @@ Smart Search understands the *idea* behind your words, not just the exact letter
 ### Made a typo? No problem
 If you type **wintar** or **snoman**, Stitchidex still finds your patterns. You'll see **"Did you mean: winter?"** with round buttons under the search box. Click a button to use that word.
 
+
+![Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"](../assets/screenshots/02-smart-search-and-spellcheck.png)
+*Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"*
+
 ### Narrowing things down
 On the left side you can choose:
 - **Hoop size:** 4x4, 5x7, 6x10, and so on, so you only see designs that fit your hoop
@@ -68,6 +78,10 @@ Click **Reset Filters** to see everything again.
 ### Light or dark screen
 If the screen feels too dark, choose **Light** from the theme picker to get a bright, white background.
 
+
+![The bright Warm Atelier Light theme](../assets/screenshots/03-warm-atelier-light-theme.png)
+*The bright Warm Atelier Light theme*
+
 ---
 
 ## 5. Looking at a Pattern & Adding Notes and Tags
@@ -78,6 +92,10 @@ If the screen feels too dark, choose **Light** from the theme picker to get a br
 - **Tag several patterns at once:** hold down the **Ctrl** key on your keyboard and click each pattern you want. Then click **Tag Selected**.
 - **Notes:** type anything you'd like to remember, such as "use metallic thread" or "stitched for the church bazaar."
 
+
+![Tagging three selected patterns at once](../assets/screenshots/04-inspector-and-bulk-tagging.png)
+*Tagging three selected patterns at once*
+
 ---
 
 ## 6. Sending a Pattern to Your USB Stick
@@ -85,11 +103,15 @@ If the screen feels too dark, choose **Light** from the theme picker to get a br
 1. Plug your USB flash drive into the computer.
 2. Click the pattern (or Ctrl+Click several), then click **Send to USB Drive**.
 3. Choose your USB stick, then choose the folder your machine expects:
-   - **Root** (the main folder) for most machines
+   - **Root of drive** (the main folder) for most machines
    - **Embroidery** for some Janome and Brother models
    - **bPocket** for Brother machines that use it
-4. Click **Send**. You can also **print** or **save** the **Printable Thread Color Chart** to keep next to your machine.
+4. Click **Copy to USB**. You can also **print** or **save** the **Printable Thread Color Chart** to keep next to your machine.
 5. Before you unplug the stick, click **Safely Eject USB** and wait for the message that says it's safe to remove.
+
+
+![Send to USB: choose your machine's folder and include a printable thread chart](../assets/screenshots/05-send-to-usb-and-thread-chart.png)
+*Send to USB: choose your machine's folder and include a printable thread chart*
 
 ---
 

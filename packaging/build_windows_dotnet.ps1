@@ -39,6 +39,9 @@ OutputBaseFilename=StichidexDotNet-Setup-$Version-win64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
+LicenseFile=$(Join-Path $root "LICENSE")
+SetupIconFile=$(Join-Path $root "src\Stitchidex.Desktop\Assets\stitchidex.ico")
+UninstallDisplayIcon={app}\stichidexdotnet.exe
 [Files]
 Source: "$out\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 [Icons]

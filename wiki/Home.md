@@ -1,4 +1,16 @@
+![Stitchidex logo](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/stitchidex-logo.png)
+
 # Welcome to the Stitchidex Wiki 🧵
+
+![Your whole pattern collection at a glance, with a large preview on the right](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/01-studio-catalog-dark.png)
+*Your whole pattern collection at a glance, with a large preview on the right*
+
+![Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/02-smart-search-and-spellcheck.png)
+*Smart Search: the typo "wintar" still finds your winter designs and offers "Did you mean: winter?"*
+
+![The bright Warm Atelier Light theme](https://raw.githubusercontent.com/rtb144/stitchidex/main/assets/screenshots/03-warm-atelier-light-theme.png)
+*The bright Warm Atelier Light theme*
+
 
 ## 1. Welcome to Stitchidex
 
@@ -18,3 +30,9 @@ Everything happens on your own computer. You don't need internet or an account, 
 ## Download
 Get the latest installer from the [Releases page](https://github.com/rtb144/stitchidex/releases/latest).
 
+
+
+---
+
+## License
+Stitchidex is free, open-source software under the **MIT License**. See [LICENSE](https://github.com/rtb144/stitchidex/blob/main/LICENSE) and [THIRD-PARTY-NOTICES.md](https://github.com/rtb144/stitchidex/blob/main/THIRD-PARTY-NOTICES.md). Its embroidery format decoders are ported from [pyembroidery](https://github.com/EmbroidePy/pyembroidery) (MIT).
