@@ -15,6 +15,12 @@ Some very old or unusual files can't be previewed. You can still search for them
 **Search finds nothing.**
 Try a simpler word (for example *snow* instead of *snowy winter wonderland*), and click **Reset Filters** in case a hoop or format filter is still switched on.
 
+**I unplugged my old USB stick. Can I still use those patterns?**
+Yes. If you chose *Keep on USB Stick*, Stitchidex keeps a saved copy, so you can still send them to your machine's stick. If you chose *Copy to My Computer*, they're in **Documents → Stitchidex Library**.
+
+**My USB stick shows up as a different drive letter now.**
+That's fine. Stitchidex recognizes the stick by its name and serial number and reconnects automatically.
+
 **Windows blocked the installer.**
 Click **More info** and then **Run anyway** (see section 2).
 

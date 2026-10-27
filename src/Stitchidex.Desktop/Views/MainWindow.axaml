@@ -141,6 +141,9 @@
             </Border>
             <TextBlock Text="{Binding SelectedPattern.Title}" FontSize="16" FontWeight="Bold" TextWrapping="Wrap"/>
             <TextBlock Text="{Binding SelectedPattern.FileName}" Classes="muted" TextWrapping="Wrap"/>
+            <Border IsVisible="{Binding HasUsbSourceStatus}" CornerRadius="10" Padding="10,6" Background="#332563EB" BorderBrush="#2563EB" BorderThickness="1">
+              <TextBlock Text="{Binding UsbSourceStatus}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+            </Border>
           </StackPanel></Border>
           <Border Classes="card"><StackPanel Spacing="6">
             <TextBlock Classes="h" Text="Pattern Metadata &amp; Geometry Inspector"/>

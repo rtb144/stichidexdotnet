@@ -179,7 +179,43 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnSelectedHoopChanged(string value) => Reload();
     partial void OnSelectedCraftTagChanged(string value) => Reload();
     partial void OnSelectedFolderChanged(string? value) => Reload();
-    partial void OnSelectedPatternChanged(PatternItemViewModel? value) => NotesText = value?.Entry.Notes ?? "";
+    partial void OnSelectedPatternChanged(PatternItemViewModel? value)
+    {
+        NotesText = value?.Entry.Notes ?? "";
+        UsbSourceStatus = value == null ? "" : DescribeSource(value.Entry);
+        OnPropertyChanged(nameof(HasUsbSourceStatus));
+    }
+    [ObservableProperty] string _usbSourceStatus = "";
+    public bool HasUsbSourceStatus => UsbSourceStatus.Length > 0;
+
+    /// <summary>Inspector banner for patterns cataloged from a USB stick (or whose file is missing).</summary>
+    public static string DescribeSource(CatalogEntry e)
+    {
+        bool exists = File.Exists(e.Path);
+        if (!e.IsFromRemovableDrive && exists) return "";
+        var label = string.IsNullOrEmpty(e.VolumeLabel) ? "USB stick" : e.VolumeLabel;
+        if (exists) return $"🟢 USB Connected: {label}";
+        if (!string.IsNullOrEmpty(e.VolumeRelativePath) && UsbDriveService.GetMountedVolumes().Any(v =>
+                (e.VolumeSerial.Length > 0 ? v.VolumeSerial == e.VolumeSerial : string.Equals(v.VolumeLabel, e.VolumeLabel, StringComparison.OrdinalIgnoreCase))
+                && File.Exists(Path.Combine(v.RootPath, e.VolumeRelativePath))))
+            return $"🟢 USB Connected: {label} (new drive letter)";
+        return e.HasCachedBlob ? $"☁ USB Unplugged ('{label}') — Saved in Offline Cache (Ready to Send to USB!)" : $"🔌 USB Unplugged — Please insert '{label}'";
+    }
+
+    /// <summary>Copies a USB folder into Documents/Stitchidex Library and indexes the local copy.</summary>
+    public async Task ImportUsbFolderToComputerAsync(string usbFolder)
+    {
+        IsScanning = true; ScanStatusText = "Copying patterns to your computer…";
+        try
+        {
+            var p = MakeProgress("Copying");
+            var dest = await Task.Run(() => UsbDriveService.CopyFolderPatternsToLocalLibrary(usbFolder, null, p));
+            IsScanning = false;
+            await AddFolderAsync(dest);
+            StatusMessage = $"Backed up to {dest}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { StatusMessage = "Copy failed: " + ex.Message; IsScanning = false; }
+    }
     partial void OnSelectedThemeChanged(string value)
     {
         if (Application.Current is { } app) app.RequestedThemeVariant = value == Themes[1] ? ThemeVariant.Light : ThemeVariant.Dark;
@@ -359,8 +395,9 @@ public partial class UsbExportDialogViewModel : ObservableObject
     [ObservableProperty] string _status = "";
     public string Header => $"Send {_items.Count} pattern(s) to USB";
 
-    public UsbExportDialogViewModel(UsbExportService svc, IReadOnlyList<PatternItemViewModel> items)
-    { _svc = svc; _items = items; RefreshDrives(); }
+    readonly SqliteCatalogService? _catalog;
+    public UsbExportDialogViewModel(UsbExportService svc, IReadOnlyList<PatternItemViewModel> items, SqliteCatalogService? catalog = null)
+    { _svc = svc; _items = items; _catalog = catalog; RefreshDrives(); }
 
     [RelayCommand]
     void RefreshDrives()
@@ -380,8 +417,9 @@ public partial class UsbExportDialogViewModel : ObservableObject
         try
         {
             var chart = IncludeColorChart ? UsbExportService.GenerateThreadColorChartHtml(_items.Select(i => (i.Title, (IEnumerable<ThreadColor>)i.Palette))) : null;
-            var w = _svc.CopyToUsb(_items.Select(i => i.Path_), d.RootPath, Dest, chart);
-            Status = $"Copied {w.Count} file(s) to {UsbExportService.DestinationFolder(d.RootPath, Dest)}";
+            var missing = new List<string>();
+            var w = _svc.ExportPatterns(_items.Select(i => i.Entry), _catalog, d.RootPath, Dest, chart, missing);
+            Status = $"Copied {w.Count} file(s) to {UsbExportService.DestinationFolder(d.RootPath, Dest)}" + (missing.Count > 0 ? $" — skipped {missing.Count}: {missing[0]}" : "");
         }
         catch (Exception ex) { Status = "Copy failed: " + ex.Message; }
     }

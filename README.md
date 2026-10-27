@@ -151,6 +151,19 @@ If the screen feels too dark, choose **Light** from the theme picker to get a br
 ![Send to USB: choose your machine's folder and include a printable thread chart](assets/screenshots/05-send-to-usb-and-thread-chart.png)
 *Send to USB: choose your machine's folder and include a printable thread chart*
 
+### Patterns stored on an old USB stick
+If you add a folder that is **on a USB stick**, Stitchidex asks what you'd like to do:
+
+- **📥 Copy to My Computer (Recommended Backup).** Stitchidex copies the patterns into **Documents → Stitchidex Library**, keeping the same folders, and adds them from there. Your designs are now safe even if the stick gets lost or stops working.
+- **🔌 Keep on USB Stick (Catalog + Offline Cache).** The patterns stay on the stick. Stitchidex also saves a small copy of each pattern file inside its catalog, so you can **still send them to your machine's USB stick while the old stick is unplugged** in a drawer.
+
+When you click a pattern that came from a USB stick, a small banner on the right tells you where it is:
+- 🟢 **USB Connected:** the stick is plugged in.
+- ☁ **USB Unplugged — Saved in Offline Cache:** the stick isn't plugged in, but the pattern is ready to send anyway.
+- 🔌 **USB Unplugged — Please insert '…':** plug the stick back in to use this pattern.
+
+If Windows gives your stick a different letter next time (for example **E:** instead of **D:**), that's fine. Stitchidex recognizes the stick and finds your patterns automatically.
+
 ---
 
 ## 7. Helpful Tips & Troubleshooting
@@ -163,6 +176,12 @@ Some very old or unusual files can't be previewed. You can still search for them
 
 **Search finds nothing.**
 Try a simpler word (for example *snow* instead of *snowy winter wonderland*), and click **Reset Filters** in case a hoop or format filter is still switched on.
+
+**I unplugged my old USB stick. Can I still use those patterns?**
+Yes. If you chose *Keep on USB Stick*, Stitchidex keeps a saved copy, so you can still send them to your machine's stick. If you chose *Copy to My Computer*, they're in **Documents → Stitchidex Library**.
+
+**My USB stick shows up as a different drive letter now.**
+That's fine. Stitchidex recognizes the stick by its name and serial number and reconnects automatically.
 
 **Windows blocked the installer.**
 Click **More info** and then **Run anyway** (see section 2).

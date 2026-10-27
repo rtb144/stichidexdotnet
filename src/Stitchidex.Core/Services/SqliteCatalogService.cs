@@ -14,6 +14,12 @@ public sealed record CatalogEntry(long Id, string Path, string Title, string For
     public IReadOnlyList<string> PaletteHex { get; init; } = Array.Empty<string>();
     public int JumpCount { get; init; }
     public int TrimCount { get; init; }
+    public bool IsFromRemovableDrive { get; init; }
+    public string VolumeLabel { get; init; } = "";
+    public string VolumeSerial { get; init; } = "";
+    public string VolumeRelativePath { get; init; } = "";
+    /// <summary>True when the original file bytes are cached in SQLite (works with the USB stick unplugged).</summary>
+    public bool HasCachedBlob { get; init; }
 }
 
 public sealed class SqliteCatalogService : IDisposable
@@ -36,7 +42,7 @@ public sealed class SqliteCatalogService : IDisposable
             thumbnail BLOB, semantic_card TEXT, tags TEXT DEFAULT '[]', notes TEXT DEFAULT '');
           CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(title, semantic_card, tags, content='patterns', content_rowid='id');
           CREATE TABLE IF NOT EXISTS embeddings(pattern_id INTEGER PRIMARY KEY, model TEXT, dim INTEGER, vector BLOB);");
-        foreach (var col in new[] { "palette TEXT", "jump_count INTEGER DEFAULT 0", "trim_count INTEGER DEFAULT 0" })
+        foreach (var col in new[] { "palette TEXT", "jump_count INTEGER DEFAULT 0", "trim_count INTEGER DEFAULT 0", "is_removable INTEGER DEFAULT 0", "volume_label TEXT DEFAULT ''", "volume_serial TEXT DEFAULT ''", "volume_rel_path TEXT DEFAULT ''", "raw_blob BLOB", "has_cached_blob INTEGER DEFAULT 0" })
             try { Exec("ALTER TABLE patterns ADD COLUMN " + col); } catch (SqliteException) { }
         PurgeNonPatternRecords();
     }
@@ -135,7 +141,7 @@ public sealed class SqliteCatalogService : IDisposable
     public Task<int> RepairMissingThumbnailsAsync(IProgress<(int Done, int Total, string FileName)>? progress = null, CancellationToken ct = default) =>
         Task.Run(() =>
         {
-            var files = Query("SELECT * FROM patterns WHERE palette IS NULL OR ((thumbnail IS NULL OR length(thumbnail)=0) AND stitch_count > 0)")
+            var files = Query("SELECT " + Cols + " FROM patterns WHERE palette IS NULL OR ((thumbnail IS NULL OR length(thumbnail)=0) AND stitch_count > 0)")
                 .Select(e => e.Path).Where(File.Exists).ToList();
             return files.Count == 0 ? 0 : IndexFiles(files, progress, ct, true);
         }, ct);
@@ -154,6 +160,24 @@ public sealed class SqliteCatalogService : IDisposable
         ("$w", p.WidthMm), ("$h", p.HeightMm), ("$hc", p.HoopCategory), ("$th", p.PngThumbnail), ("$sc", card),
         ("$tg", JsonSerializer.Serialize(tags)),
         ("$pl", JsonSerializer.Serialize(p.Colors.Select(c => c.Hex).ToList())), ("$j", p.JumpCount), ("$tr", p.TrimCount));
+        var vol = UsbDriveService.InspectPathVolume(full);
+        byte[]? blob = null;
+        if (vol.IsRemovable)
+            try { if (new FileInfo(full).Length <= UsbDriveService.MaxCachedBytes) blob = UsbDriveService.ReadAllBytesShared(full); } catch (IOException) { }
+        Exec("UPDATE patterns SET is_removable=$r,volume_label=$vl,volume_serial=$vs,volume_rel_path=$vr,raw_blob=$b,has_cached_blob=$hb WHERE path=$p",
+            ("$r", vol.IsRemovable ? 1 : 0), ("$vl", vol.VolumeLabel), ("$vs", vol.VolumeSerial), ("$vr", vol.VolumeRelativePath),
+            ("$b", blob), ("$hb", blob is { Length: > 0 } ? 1 : 0), ("$p", full));
+    }
+
+    /// <summary>Original file bytes cached for removable-drive patterns (null when not cached).</summary>
+    public byte[]? GetCachedPatternBytes(long id)
+    {
+        lock (_gate)
+        {
+            using var c = _db.CreateCommand(); c.Transaction = _tx;
+            c.CommandText = "SELECT raw_blob FROM patterns WHERE id=$i"; c.Parameters.AddWithValue("$i", id);
+            return c.ExecuteScalar() as byte[];
+        }
     }
 
     /// <summary>Upgrades old rows: rebuilds semantic cards with folder context + PEC header label (no DB delete needed).</summary>
@@ -214,9 +238,9 @@ public sealed class SqliteCatalogService : IDisposable
         return n;
     }
 
-    public CatalogEntry? Get(long id) => Query("SELECT * FROM patterns WHERE id=$i", ("$i", id)).FirstOrDefault();
-    public IReadOnlyList<CatalogEntry> All() => Query("SELECT * FROM patterns ORDER BY title COLLATE NOCASE");
-    IReadOnlyList<CatalogEntry> AllRaw() => Query("SELECT * FROM patterns");
+    public CatalogEntry? Get(long id) => Query("SELECT " + Cols + " FROM patterns WHERE id=$i", ("$i", id)).FirstOrDefault();
+    public IReadOnlyList<CatalogEntry> All() => Query("SELECT " + Cols + " FROM patterns ORDER BY title COLLATE NOCASE");
+    IReadOnlyList<CatalogEntry> AllRaw() => Query("SELECT " + Cols + " FROM patterns");
 
     void SetTags(long id, IEnumerable<string> tags)
     {
@@ -283,6 +307,8 @@ public sealed class SqliteCatalogService : IDisposable
         }
     }
 
+    const string Cols = "id,path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags,notes,palette,jump_count,trim_count,is_removable,volume_label,volume_serial,volume_rel_path,has_cached_blob";
+
     IReadOnlyList<CatalogEntry> Query(string sql, params (string, object?)[] ps)
     {
         lock (_gate) return QueryCore(sql, ps);
@@ -307,10 +333,17 @@ public sealed class SqliteCatalogService : IDisposable
                 PaletteHex = ReadList(S("palette")),
                 JumpCount = r["jump_count"] is long jc ? (int)jc : 0,
                 TrimCount = r["trim_count"] is long tc ? (int)tc : 0,
+                IsFromRemovableDrive = Has(r, "is_removable") && r["is_removable"] is long ir && ir != 0,
+                VolumeLabel = Has(r, "volume_label") ? S("volume_label") : "",
+                VolumeSerial = Has(r, "volume_serial") ? S("volume_serial") : "",
+                VolumeRelativePath = Has(r, "volume_rel_path") ? S("volume_rel_path") : "",
+                HasCachedBlob = Has(r, "has_cached_blob") && r["has_cached_blob"] is long hb && hb != 0,
             });
         }
         return list;
     }
+
+    static bool Has(SqliteDataReader r, string col) { for (int i = 0; i < r.FieldCount; i++) if (r.GetName(i) == col) return true; return false; }
 
     static List<string> ReadList(string json)
     {

@@ -24,7 +24,41 @@ public partial class MainWindow : Window
     async void OnAddFolder(object? s, RoutedEventArgs e)
     {
         var r = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Add embroidery folder", AllowMultiple = false });
-        if (r.Count > 0 && r[0].TryGetLocalPath() is { } p) await Vm.AddFolderAsync(p);
+        if (r.Count == 0 || r[0].TryGetLocalPath() is not { } p) return;
+        if (!Stitchidex.Core.Services.UsbDriveService.InspectPathVolume(p).IsRemovable) { await Vm.AddFolderAsync(p); return; }
+        switch (await ShowRemovableDriveImportChoiceAsync())
+        {
+            case 1: await Vm.ImportUsbFolderToComputerAsync(p); break;
+            case 2: await Vm.AddFolderAsync(p); break;
+        }
+    }
+
+    /// <summary>1 = copy to computer, 2 = keep on USB (catalog + offline cache), 0 = cancel.</summary>
+    async Task<int> ShowRemovableDriveImportChoiceAsync()
+    {
+        int result = 0;
+        var dlg = new Window { Title = "Patterns on a USB stick", Width = 520, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, CanResize = false };
+        Button B(string text, int v, bool primary = false)
+        {
+            var b = new Button { Content = text, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Padding = new Avalonia.Thickness(12, 10), FontSize = 15 };
+            if (primary) b.Classes.Add("accent");
+            b.Click += (_, _) => { result = v; dlg.Close(); };
+            return b;
+        }
+        dlg.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(20), Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = "This folder is on a USB stick.", FontSize = 18, FontWeight = Avalonia.Media.FontWeight.SemiBold },
+                new TextBlock { Text = "USB sticks can get lost or wear out. Would you like to keep a safe copy of these patterns on this computer?", TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontSize = 15 },
+                B("📥 Copy to My Computer (Recommended Backup)", 1, true),
+                B("🔌 Keep on USB Stick (Catalog + Offline Cache)", 2),
+                B("Cancel", 0),
+            }
+        };
+        await dlg.ShowDialog(this);
+        return result;
     }
 
     void SyncSelection(System.Collections.IList items)
@@ -53,7 +87,7 @@ public partial class MainWindow : Window
     {
         var sel = Vm.EffectiveSelection();
         if (sel.Count == 0) { Vm.StatusMessage = "Select patterns to send to USB."; return; }
-        await new UsbExportDialog { DataContext = new UsbExportDialogViewModel(Vm.Usb, sel) }.ShowDialog(this);
+        await new UsbExportDialog { DataContext = new UsbExportDialogViewModel(Vm.Usb, sel, Vm.Catalog) }.ShowDialog(this);
     }
 
     void OnWindowKeyDown(object? s, KeyEventArgs e)

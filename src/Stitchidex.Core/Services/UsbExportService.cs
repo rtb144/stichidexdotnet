@@ -98,7 +98,7 @@ public sealed class UsbExportService
             var target = Path.Combine(folder, name);
             int n = 1;
             while (File.Exists(target)) target = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(name)}_{n++}{Path.GetExtension(name)}");
-            File.Copy(f, target);
+            File.WriteAllBytes(target, UsbDriveService.ReadAllBytesShared(f));
             written.Add(target);
         }
         if (chartHtml != null)
@@ -108,6 +108,19 @@ public sealed class UsbExportService
             written.Add(chart);
         }
         return written;
+    }
+
+    /// <summary>Exports catalog patterns, resolving unplugged/remapped USB sources (drive-letter change or offline cache).</summary>
+    public IReadOnlyList<string> ExportPatterns(IEnumerable<CatalogEntry> entries, SqliteCatalogService? catalog, string driveRoot, UsbDestination dest,
+        string? chartHtml = null, List<string>? unavailable = null)
+    {
+        var files = new List<string>();
+        foreach (var e in entries)
+        {
+            var r = UsbDriveService.ResolvePatternSourcePath(e, catalog);
+            if (r.Path != null) files.Add(r.Path); else unavailable?.Add(r.Status);
+        }
+        return CopyToUsb(files, driveRoot, dest, chartHtml);
     }
 
     public static (string FileName, string Arguments)[] BuildEjectCommands(RemovableDrive drive, bool windows)

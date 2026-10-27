@@ -151,7 +151,7 @@ public static class Sidecar
             {
                 var f = Path.Combine(dir, stem + ext);
                 if (!File.Exists(f)) continue;
-                var d = File.ReadAllBytes(f);
+                var d = Stitchidex.Core.Services.UsbDriveService.ReadAllBytesShared(f);
                 var e = ext.ToLowerInvariant();
                 if (e == ".edr") for (int o = 0; o + 3 < d.Length; o += 4) res.Add(Palettes.Rgb((uint)(d[o] << 16 | d[o + 1] << 8 | d[o + 2])));
                 else if (e == ".col")
@@ -678,7 +678,7 @@ public static class EmbroideryParserRegistry
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
         if (!TryGetParser(ext, out var parser)) throw new NotSupportedException($"Unsupported extension '{ext}'");
-        using var fs = File.OpenRead(path);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         var p = parser!.Parse(fs, path);
         p.FilePath = path;
         return p;
