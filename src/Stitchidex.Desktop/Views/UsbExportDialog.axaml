@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Stitchidex.Desktop.Views.UsbExportDialog" Title="Send to USB" Width="480" SizeToContent="Height" WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="16" Spacing="8">
+    <TextBlock Text="{Binding Header}" FontWeight="Bold" FontSize="15"/>
+    <StackPanel Orientation="Horizontal" Spacing="6">
+      <ComboBox Width="340" ItemsSource="{Binding Drives}" SelectedItem="{Binding SelectedDrive}">
+        <ComboBox.ItemTemplate><DataTemplate><TextBlock><Run Text="{Binding Label}"/><Run Text="  "/><Run Text="{Binding RootPath}" Foreground="Gray"/></TextBlock></DataTemplate></ComboBox.ItemTemplate>
+      </ComboBox>
+      <Button Content="↻" Command="{Binding RefreshDrivesCommand}"/>
+    </StackPanel>
+    <TextBlock Text="Destination folder"/>
+    <RadioButton GroupName="dest" Content="Root of drive" IsChecked="{Binding DestRoot}"/>
+    <RadioButton GroupName="dest" Content="Embroidery" IsChecked="{Binding DestEmbroidery}"/>
+    <RadioButton GroupName="dest" Content="bPocket" IsChecked="{Binding DestBPocket}"/>
+    <CheckBox Content="Include printable thread color chart" IsChecked="{Binding IncludeColorChart}"/>
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button Content="💾 Copy to USB" Command="{Binding CopyCommand}" Classes="accent"/>
+      <Button Content="⏏ Safely Eject USB" Command="{Binding EjectCommand}"/>
+      <Button Content="Close" Click="OnClose"/>
+    </StackPanel>
+    <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+  </StackPanel>
+</Window>

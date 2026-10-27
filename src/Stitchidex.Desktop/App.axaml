@@ -1,0 +1,9 @@
+<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Stitchidex.Desktop.App" RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+    <Style Selector="Border.badge"><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="6,2"/><Setter Property="Margin" Value="2"/><Setter Property="Background" Value="#33888888"/></Style>
+    <Style Selector="Border.chip"><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="8,2"/><Setter Property="Margin" Value="2"/><Setter Property="Background" Value="#445B8DEF"/></Style>
+  </Application.Styles>
+</Application>

@@ -1,0 +1,113 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Stitchidex.Desktop.Views.MainWindow" Title="Stitchidex 0.5.0 (.NET)" Width="1400" Height="860">
+  <DockPanel>
+    <!-- Toolbar -->
+    <Border DockPanel.Dock="Top" Padding="8" BorderThickness="0,0,0,1" BorderBrush="#33888888">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBox Width="320" Watermark="Search patterns…" Text="{Binding SearchText}"/>
+        <ToggleSwitch IsChecked="{Binding SmartSearchEnabled}" OnContent="Smart Search" OffContent="Keyword"/>
+        <Border Classes="chip" VerticalAlignment="Center"><TextBlock Text="{Binding SmartStatus}" FontSize="11"/></Border>
+        <Button Content="➕ Add Folder" Click="OnAddFolder"/>
+        <Button Content="➖ Remove Folder" Command="{Binding RemoveFolderCommand}"/>
+        <Button Content="{Binding TagSelectedLabel}" Click="OnBulkTag"/>
+        <Button Content="💾 Send to USB" Click="OnSendToUsb"/>
+        <Button Content="▦ Grid" Command="{Binding ShowGridCommand}"/>
+        <Button Content="☰ Table" Command="{Binding ShowTableCommand}"/>
+        <ComboBox Width="180" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding SelectedTheme}"/>
+      </StackPanel>
+    </Border>
+    <Border DockPanel.Dock="Bottom" Padding="6,2"><TextBlock Text="{Binding StatusMessage}" FontSize="11"/></Border>
+    <Grid ColumnDefinitions="240,*,340">
+      <!-- Sidebar -->
+      <ScrollViewer Grid.Column="0">
+        <StackPanel Margin="8" Spacing="6">
+          <TextBlock Text="Folders" FontWeight="Bold"/>
+          <ListBox ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}" MaxHeight="220"/>
+          <Button Content="Show all folders" Command="{Binding ClearFolderFilterCommand}" HorizontalAlignment="Stretch"/>
+          <TextBlock Text="Format Family" FontWeight="Bold"/>
+          <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding FormatFamilies}" SelectedItem="{Binding SelectedFormat}"/>
+          <TextBlock Text="Hoop Category" FontWeight="Bold"/>
+          <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding HoopCategories}" SelectedItem="{Binding SelectedHoop}"/>
+          <TextBlock Text="Craft Tag" FontWeight="Bold"/>
+          <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding CraftTags}" SelectedItem="{Binding SelectedCraftTag}"/>
+        </StackPanel>
+      </ScrollViewer>
+      <!-- Center: grid / table -->
+      <Panel Grid.Column="1">
+        <ListBox x:Name="GridList" IsVisible="{Binding IsGridView}" ItemsSource="{Binding Patterns}" SelectionMode="Multiple,Toggle"
+                 SelectedItem="{Binding SelectedPattern}" SelectionChanged="OnGridSelectionChanged">
+          <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Width="200" Spacing="4">
+                <Border Background="#22888888" CornerRadius="6" Width="192" Height="192">
+                  <Image Source="{Binding Thumbnail}" Stretch="Uniform"/>
+                </Border>
+                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+                <WrapPanel>
+                  <Border Classes="badge"><TextBlock Text="{Binding FormatBadge}" FontSize="10"/></Border>
+                  <Border Classes="badge"><TextBlock Text="{Binding HoopCategory}" FontSize="10"/></Border>
+                  <Border Classes="badge"><TextBlock Text="{Binding StitchBadge}" FontSize="10"/></Border>
+                </WrapPanel>
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <DataGrid x:Name="TableGrid" IsVisible="{Binding !IsGridView}" ItemsSource="{Binding Patterns}" SelectionMode="Extended"
+                  SelectedItem="{Binding SelectedPattern}" SelectionChanged="OnTableSelectionChanged" IsReadOnly="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="2*"/>
+            <DataGridTextColumn Header="Format" Binding="{Binding FormatFamily}" Width="*"/>
+            <DataGridTextColumn Header="Hoop" Binding="{Binding HoopCategory}" Width="*"/>
+            <DataGridTextColumn Header="Stitches" Binding="{Binding StitchCount}" Width="90"/>
+            <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" Width="120"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </Panel>
+      <!-- Inspector -->
+      <ScrollViewer Grid.Column="2">
+        <StackPanel Margin="8" Spacing="8" IsVisible="{Binding HasSelection}">
+          <Border Background="#22888888" CornerRadius="6" Height="256"><Image Source="{Binding SelectedPattern.Thumbnail}" Stretch="Uniform"/></Border>
+          <TextBlock Text="{Binding SelectedPattern.Title}" FontSize="16" FontWeight="Bold" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto">
+            <Border Grid.Row="0" Grid.Column="0" Classes="badge"><TextBlock Text="{Binding SelectedPattern.FormatFamily}" TextWrapping="Wrap"/></Border>
+            <Border Grid.Row="0" Grid.Column="1" Classes="badge"><TextBlock Text="{Binding SelectedPattern.HoopCategory}" TextWrapping="Wrap"/></Border>
+            <Border Grid.Row="1" Grid.Column="0" Classes="badge"><TextBlock Text="{Binding SelectedPattern.StitchBadge}" TextWrapping="Wrap"/></Border>
+            <Border Grid.Row="1" Grid.Column="1" Classes="badge"><TextBlock Text="{Binding SelectedPattern.SizeText}" TextWrapping="Wrap"/></Border>
+            <Border Grid.Row="2" Grid.ColumnSpan="2" Classes="badge"><TextBlock Text="{Binding SelectedPattern.Path_}" TextWrapping="Wrap" FontSize="10"/></Border>
+          </Grid>
+          <TextBlock Text="User Notes &amp; Custom Tags" FontWeight="Bold"/>
+          <TextBox Text="{Binding NotesText}" AcceptsReturn="True" TextWrapping="Wrap" Height="70" Watermark="Notes…"/>
+          <Button Content="Save Notes" Command="{Binding SaveNotesCommand}"/>
+          <ItemsControl ItemsSource="{Binding SelectedPattern.Tags}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Classes="chip"><StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Text="{Binding}" VerticalAlignment="Center"/>
+                  <Button Content="✕" Padding="2,0" FontSize="10"
+                          Command="{Binding $parent[Window].DataContext.RemoveTagCommand}" CommandParameter="{Binding}"/>
+                </StackPanel></Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBox Width="220" Text="{Binding NewTagText}" Watermark="Add tag…"/>
+            <Button Content="Add" Command="{Binding AddTagCommand}"/>
+          </StackPanel>
+          <TextBlock Text="Thread Palette" FontWeight="Bold"/>
+          <ItemsControl ItemsSource="{Binding SelectedPattern.Palette}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2">
+                  <Border Width="28" Height="18" CornerRadius="3" Background="{Binding Hex}" BorderBrush="#555" BorderThickness="1"/>
+                  <TextBlock Text="{Binding Name}"/><TextBlock Text="{Binding Hex}" Opacity="0.6"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</Window>

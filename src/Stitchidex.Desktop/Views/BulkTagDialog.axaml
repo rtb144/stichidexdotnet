@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Stitchidex.Desktop.Views.BulkTagDialog" Title="Bulk Tag" Width="460" SizeToContent="Height" WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="16" Spacing="8">
+    <TextBlock Text="{Binding Header}" FontWeight="Bold" FontSize="15"/>
+    <TextBlock Text="Quick tags"/>
+    <ItemsControl ItemsSource="{Binding QuickTagOptions}">
+      <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate><DataTemplate>
+        <Button Content="{Binding}" Margin="2" Command="{Binding $parent[Window].DataContext.QuickCommand}" CommandParameter="{Binding}"/>
+      </DataTemplate></ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <TextBox Text="{Binding AddText}" Watermark="Tags to add (comma separated)"/>
+    <TextBox Text="{Binding RemoveText}" Watermark="Tags to remove (comma separated)"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" Click="OnCancel"/>
+      <Button Content="Apply" Click="OnApply" Classes="accent"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
