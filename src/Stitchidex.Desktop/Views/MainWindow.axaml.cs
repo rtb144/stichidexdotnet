@@ -10,11 +10,14 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Opened += (_, _) =>
+        Opened += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            if (DataContext is MainWindowViewModel vm && vm.SelectedPattern == null && vm.Patterns.Count > 0)
-                GridList.SelectedIndex = 0;
-        };
+            if (DataContext is MainWindowViewModel vm && vm.Patterns.Count > 0 && vm.SelectedPattern == null)
+            {
+                vm.SelectedPattern = vm.Patterns[0];
+                GridList.SelectedItem = vm.SelectedPattern;
+            }
+        });
     }
     MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
 
@@ -30,7 +33,12 @@ public partial class MainWindow : Window
         foreach (var i in items.OfType<PatternItemViewModel>()) Vm.SelectedPatterns.Add(i);
     }
     void OnGridSelectionChanged(object? s, SelectionChangedEventArgs e) => SyncSelection(GridList.SelectedItems!);
-    void OnTableSelectionChanged(object? s, SelectionChangedEventArgs e) => SyncSelection(TableGrid.SelectedItems);
+    void OnTableSelectionChanged(object? s, SelectionChangedEventArgs e)
+    {
+        if (!TableGrid.IsVisible) return;
+        if (TableGrid.SelectedItem is PatternItemViewModel p) Vm.SelectedPattern = p;
+        SyncSelection(TableGrid.SelectedItems);
+    }
 
     async void OnBulkTag(object? s, RoutedEventArgs e)
     {

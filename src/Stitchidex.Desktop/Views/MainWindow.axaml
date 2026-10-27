@@ -96,7 +96,7 @@
             </ListBox.ItemTemplate>
           </ListBox>
           <DataGrid x:Name="TableGrid" IsVisible="{Binding !IsGridView}" ItemsSource="{Binding Patterns}" SelectionMode="Extended"
-                    SelectedItem="{Binding SelectedPattern}" SelectionChanged="OnTableSelectionChanged" IsReadOnly="True" CanUserSortColumns="True" RowHeight="54">
+                    SelectionChanged="OnTableSelectionChanged" IsReadOnly="True" CanUserSortColumns="True" RowHeight="54">
             <DataGrid.Columns>
               <DataGridTemplateColumn Header="" Width="60">
                 <DataGridTemplateColumn.CellTemplate><DataTemplate>
