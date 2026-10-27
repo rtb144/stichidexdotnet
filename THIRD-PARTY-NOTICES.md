@@ -21,7 +21,7 @@ Stitchidex is MIT-licensed (see [LICENSE](LICENSE)). It includes, ports, or dist
 ```
 MIT License
 
-Copyright (c) 2018 
+Copyright (c) 2018 Tatarize and pyembroidery contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

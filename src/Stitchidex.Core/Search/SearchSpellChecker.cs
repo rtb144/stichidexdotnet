@@ -7,6 +7,7 @@ public sealed record SpellSuggestion(string? CorrectedQuery, IReadOnlyList<strin
 /// over the embroidery concept vocabulary plus words from the user's own catalog.</summary>
 public static class SearchSpellChecker
 {
+    static readonly Regex WordRx = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
     public static readonly HashSet<string> BaseVocabulary =
         SearchText.Groups.SelectMany(g => g).Where(w => w.Length >= 3).ToHashSet();
 
@@ -52,7 +53,7 @@ public static class SearchSpellChecker
 
     public static SpellSuggestion SuggestCorrections(string query, ISet<string> vocab, int maxSuggestions = 6)
     {
-        var words = Regex.Matches((query ?? "").ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
+        var words = WordRx.Matches((query ?? "").ToLowerInvariant()).Select(m => m.Value).ToList();
         if (words.Count == 0) return new SpellSuggestion(null, Array.Empty<string>());
         bool changed = false;
         var fixedWords = words.Select(w => { var c = Correct(w, vocab); if (c != null) { changed = true; return c; } return w; }).ToList();

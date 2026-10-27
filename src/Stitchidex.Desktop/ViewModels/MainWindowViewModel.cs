@@ -240,8 +240,14 @@ public partial class MainWindowViewModel : ObservableObject
 
     public async Task ReloadAsync(int debounceMs = 0)
     {
-        _searchCts?.Cancel();
+        var previous = _searchCts;
         var cts = _searchCts = new CancellationTokenSource();
+        if (previous != null)
+        {
+            try { previous.Cancel(); } catch (ObjectDisposedException) { }
+            // Dispose after its in-flight Task.Delay/Task.Run observe cancellation.
+            _ = Task.Delay(1000).ContinueWith(_ => previous.Dispose(), TaskScheduler.Default);
+        }
         var ct = cts.Token;
         var q = SearchText; var smart = SmartSearchEnabled; var folder = SelectedFolder; var fmt = SelectedFormat;
         var hoop = SelectedHoop; var craft = SelectedCraftTag; var msT = MaxStitchesText; var mcT = MaxColorsText;

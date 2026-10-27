@@ -17,10 +17,16 @@ public sealed class HybridSmartSearchService
     IReadOnlyList<CatalogEntry> _entries = Array.Empty<CatalogEntry>();
     Dictionary<long, (HashSet<string> Tokens, HashSet<int> Concepts, string Text)> _docs = new();
     long _loadedVersion = -1;
-    HashSet<string> _vocab = new(SearchSpellChecker.BaseVocabulary);
+    volatile HashSet<string> _vocab = new(SearchSpellChecker.BaseVocabulary);
 
-    /// <summary>"Did you mean" + completion chips using concept words and this catalog's words.</summary>
-    public SpellSuggestion Suggest(string query) { EnsureIndexMeta(); return SearchSpellChecker.SuggestCorrections(query, _vocab); }
+    /// <summary>"Did you mean" + completion chips using concept words and this catalog's words.
+    /// Never blocks on <c>_lock</c>: if EnsureIndex() is busy embedding, the last published vocabulary snapshot is used.</summary>
+    public SpellSuggestion Suggest(string query)
+    {
+        if (_catalog.Version != _loadedVersion && Monitor.TryEnter(_lock))
+            try { RefreshMetaLocked(); } finally { Monitor.Exit(_lock); }
+        return SearchSpellChecker.SuggestCorrections(query, _vocab);
+    }
 
     public HybridSmartSearchService(SqliteCatalogService catalog, IEmbeddingProvider? embedder = null)
     { _catalog = catalog; _embedder = embedder ?? new LocalCpuEmbeddingProvider(); }
@@ -38,11 +44,16 @@ public sealed class HybridSmartSearchService
         return string.Join(" ", toks.Concat(extra).Distinct());
     }
 
+    /// <summary>Single-pass cosine. Vectors from the ONNX / blended providers are L2-normalized, so the norms are ~1
+    /// and this reduces to the dot product; unnormalized inputs still get the exact norm correction.</summary>
     public static double Cosine(float[] a, float[] b)
     {
+        int n = Math.Min(a.Length, b.Length);
         double d = 0, na = 0, nb = 0;
-        for (int i = 0; i < Math.Min(a.Length, b.Length); i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-        return na == 0 || nb == 0 ? 0 : d / Math.Sqrt(na * nb);
+        for (int i = 0; i < n; i++) { float x = a[i], y = b[i]; d += x * y; na += x * x; nb += y * y; }
+        if (na == 0 || nb == 0) return 0;
+        if (Math.Abs(na - 1) < 1e-3 && Math.Abs(nb - 1) < 1e-3) return d;
+        return d / Math.Sqrt(na * nb);
     }
 
     internal static string Doc(CatalogEntry e)
@@ -55,6 +66,23 @@ public sealed class HybridSmartSearchService
     public void EnsureIndex(CancellationToken ct = default)
     {
         lock (_lock)
+        {
+            RefreshMetaLocked();
+            var missing = _entries.Where(e => !_vectors.ContainsKey(e.Id)).ToList();
+            foreach (var e in missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                var v = _embedder.Embed(Doc(e));
+                _vectors[e.Id] = v;
+                _catalog.SaveEmbedding(e.Id, _embedder.ModelName, v);
+            }
+            if (missing.Count > 0) _loadedVersion = _catalog.Version; // our own SaveEmbedding writes don't invalidate
+        }
+    }
+
+    /// <summary>Reloads entries/docs/vocabulary when the catalog changed. Caller must hold <c>_lock</c>.</summary>
+    void RefreshMetaLocked()
+    {
         {
             var ver = _catalog.Version;
             if (ver != _loadedVersion)
@@ -71,15 +99,6 @@ public sealed class HybridSmartSearchService
                 foreach (var id in _vectors.Keys.Where(k => !_docs.ContainsKey(k)).ToList()) _vectors.TryRemove(id, out _);
                 _loadedVersion = ver;
             }
-            var missing = _entries.Where(e => !_vectors.ContainsKey(e.Id)).ToList();
-            foreach (var e in missing)
-            {
-                ct.ThrowIfCancellationRequested();
-                var v = _embedder.Embed(Doc(e));
-                _vectors[e.Id] = v;
-                _catalog.SaveEmbedding(e.Id, _embedder.ModelName, v);
-            }
-            if (missing.Count > 0) _loadedVersion = _catalog.Version; // our own SaveEmbedding writes don't invalidate
         }
     }
 

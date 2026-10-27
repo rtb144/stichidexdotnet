@@ -45,7 +45,20 @@ internal static class ParserUtil
             FormatFamily = EmbroideryParserRegistry.FormatFamilyMap.TryGetValue(ext, out var f) ? f : ext,
         };
     }
-    public static byte[] ReadAll(Stream s) { using var ms = new MemoryStream(); s.CopyTo(ms); return ms.ToArray(); }
+    /// <summary>Largest embroidery file we will read into memory (real designs are a few MB at most).</summary>
+    public const long MaxFileBytes = 50L * 1024 * 1024;
+    public static byte[] ReadAll(Stream s)
+    {
+        if (s.CanSeek && s.Length - s.Position > MaxFileBytes) throw new InvalidDataException($"File exceeds {MaxFileBytes / (1024 * 1024)} MB limit");
+        using var ms = new MemoryStream();
+        var buf = new byte[81920]; int n;
+        while ((n = s.Read(buf, 0, buf.Length)) > 0)
+        {
+            if (ms.Length + n > MaxFileBytes) throw new InvalidDataException($"File exceeds {MaxFileBytes / (1024 * 1024)} MB limit");
+            ms.Write(buf, 0, n);
+        }
+        return ms.ToArray();
+    }
 }
 
 /// <summary>Brother PES (and raw PEC) parser.</summary>

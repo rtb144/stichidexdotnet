@@ -40,10 +40,11 @@ public sealed class SqliteCatalogService : IDisposable
             id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, title TEXT, format_family TEXT,
             stitch_count INTEGER, color_count INTEGER, width_mm REAL, height_mm REAL, hoop_category TEXT,
             thumbnail BLOB, semantic_card TEXT, tags TEXT DEFAULT '[]', notes TEXT DEFAULT '');
-          CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(title, semantic_card, tags, content='patterns', content_rowid='id');
+          CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(title, semantic_card, tags, notes, content='patterns', content_rowid='id');
           CREATE TABLE IF NOT EXISTS embeddings(pattern_id INTEGER PRIMARY KEY, model TEXT, dim INTEGER, vector BLOB);");
         foreach (var col in new[] { "palette TEXT", "jump_count INTEGER DEFAULT 0", "trim_count INTEGER DEFAULT 0", "is_removable INTEGER DEFAULT 0", "volume_label TEXT DEFAULT ''", "volume_serial TEXT DEFAULT ''", "volume_rel_path TEXT DEFAULT ''", "raw_blob BLOB", "has_cached_blob INTEGER DEFAULT 0" })
             try { Exec("ALTER TABLE patterns ADD COLUMN " + col); } catch (SqliteException) { }
+        MigrateFtsNotesColumn();
         PurgeNonPatternRecords();
     }
 
@@ -77,9 +78,67 @@ public sealed class SqliteCatalogService : IDisposable
 
     void ReindexFts() => Exec("INSERT INTO patterns_fts(patterns_fts) VALUES('rebuild');");
 
+    /// <summary>Older catalogs created patterns_fts without the notes column; recreate + rebuild once.</summary>
+    void MigrateFtsNotesColumn()
+    {
+        string? sql;
+        lock (_gate)
+        {
+            using var c = _db.CreateCommand();
+            c.CommandText = "SELECT sql FROM sqlite_master WHERE name='patterns_fts'";
+            sql = c.ExecuteScalar() as string;
+        }
+        if (sql != null && !sql.Contains("notes", StringComparison.OrdinalIgnoreCase))
+        {
+            Exec("DROP TABLE patterns_fts;");
+            Exec("CREATE VIRTUAL TABLE patterns_fts USING fts5(title, semantic_card, tags, notes, content='patterns', content_rowid='id');");
+            ReindexFts();
+        }
+    }
+
+    (string Title, string Card, string Tags, string Notes)? FtsValues(long id)
+    {
+        lock (_gate)
+        {
+            using var c = _db.CreateCommand(); c.Transaction = _tx;
+            c.CommandText = "SELECT title, semantic_card, tags, notes FROM patterns WHERE id=$i";
+            c.Parameters.AddWithValue("$i", id);
+            using var r = c.ExecuteReader();
+            if (!r.Read()) return null;
+            string S(int i) => r.IsDBNull(i) ? "" : r.GetString(i);
+            return (S(0), S(1), S(2), S(3));
+        }
+    }
+
+    /// <summary>Targeted single-row FTS5 update: removes the row's old indexed values and inserts the current ones
+    /// (no full-table 'rebuild' on every tag/note edit).</summary>
+    void UpdateFtsRow(long id, (string Title, string Card, string Tags, string Notes)? old)
+    {
+        lock (_gate)
+        {
+            if (old is { } o)
+                Exec("INSERT INTO patterns_fts(patterns_fts,rowid,title,semantic_card,tags,notes) VALUES('delete',$i,$t,$c,$g,$n)",
+                    ("$i", id), ("$t", o.Title), ("$c", o.Card), ("$g", o.Tags), ("$n", o.Notes));
+            if (FtsValues(id) is { } v)
+                Exec("INSERT INTO patterns_fts(rowid,title,semantic_card,tags,notes) VALUES($i,$t,$c,$g,$n)",
+                    ("$i", id), ("$t", v.Title), ("$c", v.Card), ("$g", v.Tags), ("$n", v.Notes));
+        }
+    }
+
+    /// <summary>Applies a metadata edit to one row and updates only that row's FTS entry.</summary>
+    void UpdateMeta(long id, Action edit)
+    {
+        lock (_gate)
+        {
+            var old = FtsValues(id);
+            edit();
+            UpdateFtsRow(id, old);
+        }
+    }
+
     public int PurgeNonPatternRecords()
     {
-        var bad = AllRaw().Where(e => !EmbroideryParserRegistry.IsEmbroideryExtension(System.IO.Path.GetExtension(e.Path))).Select(e => e.Id).ToList();
+        var bad = AllMetadataRaw().Where(e => !EmbroideryParserRegistry.IsEmbroideryExtension(System.IO.Path.GetExtension(e.Path))).Select(e => e.Id).ToList();
         foreach (var id in bad) { Exec("DELETE FROM patterns WHERE id=$i", ("$i", id)); Exec("DELETE FROM embeddings WHERE pattern_id=$i", ("$i", id)); }
         if (bad.Count > 0) ReindexFts();
         return bad.Count;
@@ -99,7 +158,13 @@ public sealed class SqliteCatalogService : IDisposable
             if (render && p.StitchCount > 0) p.PngThumbnail = ThumbnailRenderer.RenderThumbnailPng(p);
             return p;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException or IndexOutOfRangeException or ArgumentException or UnauthorizedAccessException) { return null; }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Any corrupt/hostile file (Overflow, InvalidCast, NullReference, OOM, ...) skips just this file, never the whole chunk.
+            System.Diagnostics.Trace.TraceWarning($"Stitchidex: skipped unreadable pattern '{f}': {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
     }
 
     public int ScanDirectory(string folder, bool renderThumbnails = true) =>
@@ -163,7 +228,7 @@ public sealed class SqliteCatalogService : IDisposable
         var vol = UsbDriveService.InspectPathVolume(full);
         byte[]? blob = null;
         if (vol.IsRemovable)
-            try { if (new FileInfo(full).Length <= UsbDriveService.MaxCachedBytes) blob = UsbDriveService.ReadAllBytesShared(full); } catch (IOException) { }
+            try { if (new FileInfo(full).Length <= UsbDriveService.MaxCachedBytes) blob = UsbDriveService.ReadAllBytesShared(full); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         Exec("UPDATE patterns SET is_removable=$r,volume_label=$vl,volume_serial=$vs,volume_rel_path=$vr,raw_blob=$b,has_cached_blob=$hb WHERE path=$p",
             ("$r", vol.IsRemovable ? 1 : 0), ("$vl", vol.VolumeLabel), ("$vs", vol.VolumeSerial), ("$vr", vol.VolumeRelativePath),
             ("$b", blob), ("$hb", blob is { Length: > 0 } ? 1 : 0), ("$p", full));
@@ -242,6 +307,10 @@ public sealed class SqliteCatalogService : IDisposable
     public IReadOnlyList<CatalogEntry> All() => Query("SELECT " + Cols + " FROM patterns ORDER BY title COLLATE NOCASE");
     IReadOnlyList<CatalogEntry> AllRaw() => Query("SELECT " + Cols + " FROM patterns");
 
+    /// <summary>Lightweight metadata query: never reads the thumbnail PNG or raw_blob BLOB columns.</summary>
+    public IReadOnlyList<CatalogEntry> AllMetadataRaw() => Query("SELECT " + MetaCols + " FROM patterns");
+    CatalogEntry? GetMeta(long id) => Query("SELECT " + MetaCols + " FROM patterns WHERE id=$i", ("$i", id)).FirstOrDefault();
+
     void SetTags(long id, IEnumerable<string> tags)
     {
         Exec("UPDATE patterns SET tags=$t WHERE id=$i", ("$t", JsonSerializer.Serialize(tags.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList())), ("$i", id));
@@ -254,21 +323,19 @@ public sealed class SqliteCatalogService : IDisposable
     public void BulkAddTags(IEnumerable<long> ids, IEnumerable<string> tags)
     {
         var add = tags.Select(Norm).Where(t => t.Length > 0).ToList();
-        InTransaction(() => { foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Concat(add)); });
-        ReindexFts();
+        InTransaction(() => { foreach (var id in ids) if (GetMeta(id) is { } e) UpdateMeta(id, () => SetTags(id, e.Tags.Concat(add))); });
     }
 
     public void BulkRemoveTags(IEnumerable<long> ids, IEnumerable<string> tags)
     {
         var rm = new HashSet<string>(tags.Select(Norm));
-        InTransaction(() => { foreach (var id in ids) if (Get(id) is { } e) SetTags(id, e.Tags.Where(t => !rm.Contains(t))); });
-        ReindexFts();
+        InTransaction(() => { foreach (var id in ids) if (GetMeta(id) is { } e) UpdateMeta(id, () => SetTags(id, e.Tags.Where(t => !rm.Contains(t)))); });
     }
 
-    public void SetNotes(long id, string notes) => Exec("UPDATE patterns SET notes=$n WHERE id=$i", ("$n", notes), ("$i", id));
+    public void SetNotes(long id, string notes) => UpdateMeta(id, () => Exec("UPDATE patterns SET notes=$n WHERE id=$i", ("$n", notes), ("$i", id)));
 
     public IReadOnlyList<string> GetAllCraftTags() =>
-        AllRaw().SelectMany(e => e.Tags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+        AllMetadataRaw().SelectMany(e => e.Tags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
 
     public IReadOnlyList<(long Id, double Rank)> FullTextSearch(string query, int limit = 200)
     {
@@ -308,6 +375,7 @@ public sealed class SqliteCatalogService : IDisposable
     }
 
     const string Cols = "id,path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags,notes,palette,jump_count,trim_count,is_removable,volume_label,volume_serial,volume_rel_path,has_cached_blob";
+    const string MetaCols = "id,path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,NULL AS thumbnail,semantic_card,tags,notes,palette,jump_count,trim_count,is_removable,volume_label,volume_serial,volume_rel_path,CASE WHEN raw_blob IS NOT NULL AND length(raw_blob) > 0 THEN 1 ELSE 0 END AS has_cached_blob";
 
     IReadOnlyList<CatalogEntry> Query(string sql, params (string, object?)[] ps)
     {

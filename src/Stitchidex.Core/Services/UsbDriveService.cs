@@ -45,13 +45,30 @@ public static class UsbDriveService
                 var p = line.Split(' ');
                 if (p.Length < 2) continue;
                 var mp = p[1].Replace("\\040", " ");
-                if (!(mp.StartsWith("/media/") || mp.StartsWith("/run/media/") || mp.StartsWith("/mnt/"))) continue;
+                // /mnt is conventionally for internal/fixed disks: only /media and /run/media (udisks) count as removable,
+                // plus anything whose block device reports /sys/class/block/<dev>/removable == 1.
+                if (!(mp.StartsWith("/media/") || mp.StartsWith("/run/media/") || SysfsRemovable(p[0]))) continue;
                 uuids.TryGetValue(p[0], out var uuid);
                 list.Add((mp, Path.GetFileName(mp), uuid ?? ""));
             }
         }
         catch (Exception) { }
         return list;
+    }
+
+    static bool SysfsRemovable(string device)
+    {
+        try
+        {
+            if (!device.StartsWith("/dev/")) return false;
+            var dev = new FileInfo(device).ResolveLinkTarget(true)?.Name ?? Path.GetFileName(device);
+            var sys = Path.Combine("/sys/class/block", dev);
+            if (!Directory.Exists(sys)) return false;
+            var f = Path.Combine(sys, "removable");
+            if (!File.Exists(f)) f = Path.Combine(Directory.GetParent(new DirectoryInfo(sys).ResolveLinkTarget(true)?.FullName ?? sys)!.FullName, "removable");
+            return File.Exists(f) && File.ReadAllText(f).Trim() == "1";
+        }
+        catch (Exception) { return false; }
     }
 
     static Dictionary<string, string> LinuxUuids()
