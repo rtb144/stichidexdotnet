@@ -191,6 +191,12 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     CancellationTokenSource? _searchCts;
+    public ObservableCollection<string> SearchSuggestions { get; } = new();
+    [ObservableProperty] string _didYouMean = "";
+    public bool HasSuggestions => SearchSuggestions.Count > 0;
+
+    [RelayCommand]
+    void ApplySuggestion(string? s) { if (!string.IsNullOrWhiteSpace(s)) SearchText = s; }
     readonly Dictionary<long, PatternItemViewModel> _vmCache = new();
 
     /// <summary>Debounced, cancellable search on a background thread; only the final list is applied on the UI thread.</summary>
@@ -206,8 +212,9 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             if (debounceMs > 0) await Task.Delay(debounceMs, ct);
-            var (items, all, craftTags) = await Task.Run(() =>
+            var (items, all, sugg, craftTags) = await Task.Run(() =>
             {
+                var sugg = string.IsNullOrWhiteSpace(q) ? null : _smart.Suggest(q);
                 var all = _smart.Entries;
                 IEnumerable<CatalogEntry> items = string.IsNullOrWhiteSpace(q) ? all
                     : smart ? _smart.Search(q, 5000, ct).Select(r => r.Entry)
@@ -220,9 +227,13 @@ public partial class MainWindowViewModel : ObservableObject
                 if (int.TryParse(mcT, out var mc) && mc > 0) items = items.Where(e => e.ColorCount <= mc);
                 var list = items.ToList();
                 ct.ThrowIfCancellationRequested();
-                return (list, all, all.SelectMany(e => e.Tags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList());
+                return (list, all, sugg, all.SelectMany(e => e.Tags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList());
             }, ct);
             if (ct.IsCancellationRequested) return;
+            SearchSuggestions.Clear();
+            foreach (var x in sugg?.Suggestions ?? Array.Empty<string>()) SearchSuggestions.Add(x);
+            DidYouMean = sugg?.CorrectedQuery is { } cq ? $"Did you mean: {cq}?" : "";
+            OnPropertyChanged(nameof(HasSuggestions));
             Sync(FormatFamilies, all.Select(e => e.FormatFamily).Distinct().OrderBy(x => x));
             Sync(HoopCategories, all.Select(e => e.HoopCategory).Distinct().OrderBy(x => x));
             Sync(CraftTags, craftTags);

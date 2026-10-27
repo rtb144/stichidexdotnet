@@ -102,8 +102,11 @@ public sealed class OnnxBgeEmbeddingProvider : IEmbeddingProvider, IDisposable
     public int Dimensions => 768;
     public string Status => "bge-base-en-v1.5 (ONNX, CPU)";
 
-    public static string DefaultModelDir() =>
+    /// <summary>Bundled next to the exe (installer/.deb) — checked first for fully offline installs.</summary>
+    public static string BundledModelDir() => Path.Combine(AppContext.BaseDirectory, "models", ModelId);
+    public static string CacheModelDir() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Stitchidex", "models", ModelId);
+    public static string DefaultModelDir() => IsAvailable(BundledModelDir()) ? BundledModelDir() : CacheModelDir();
 
     public static bool IsAvailable(string? dir = null)
     {
@@ -123,7 +126,8 @@ public sealed class OnnxBgeEmbeddingProvider : IEmbeddingProvider, IDisposable
     /// <summary>Downloads the model into the cache dir if missing (call from a background thread).</summary>
     public static async Task<bool> EnsureDownloadedAsync(string? dir = null, CancellationToken ct = default)
     {
-        dir ??= DefaultModelDir();
+        if (dir == null && IsAvailable(BundledModelDir())) return true;
+        dir ??= CacheModelDir();
         if (IsAvailable(dir)) return true;
         try
         {

@@ -7,7 +7,19 @@
       <Grid ColumnDefinitions="Auto,*,Auto">
         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
           <TextBlock Text="Search:" VerticalAlignment="Center" FontWeight="SemiBold"/>
-          <TextBox Width="460" Watermark="Search patterns by title, subject, thread color, #PES version, or tag..." Text="{Binding SearchText}"/>
+          <StackPanel Spacing="4">
+            <TextBox Width="460" Watermark="Search patterns by title, subject, thread color, #PES version, or tag..." Text="{Binding SearchText}"/>
+            <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasSuggestions}">
+              <TextBlock Text="{Binding DidYouMean}" VerticalAlignment="Center" FontStyle="Italic" Opacity="0.8"/>
+              <ItemsControl ItemsSource="{Binding SearchSuggestions}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate>
+                  <Button Content="{Binding}" CornerRadius="12" Padding="10,2" FontSize="12"
+                          Command="{Binding $parent[ItemsControl].DataContext.ApplySuggestionCommand}" CommandParameter="{Binding}"/>
+                </DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </StackPanel>
           <ToggleButton IsChecked="{Binding SmartSearchEnabled}" Content="{Binding SmartSearchPill}" CornerRadius="14"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="16,0" VerticalAlignment="Center" IsVisible="{Binding IsScanning}">

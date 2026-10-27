@@ -88,3 +88,40 @@ public class ContextSearchTests : IDisposable
         Assert.True(Cos("construction", "digger excavator dump truck") > Cos("construction", "snowman snowflake"));
     }
 }
+
+public class SpellCheckTests : IDisposable
+{
+    readonly string _dir = Directory.CreateTempSubdirectory("stxsp").FullName;
+    public void Dispose() { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); try { Directory.Delete(_dir, true); } catch { } }
+
+    [Theory]
+    [InlineData("wintar", "winter")]
+    [InlineData("constrution", "construction")]
+    [InlineData("snoman", "snowman")]
+    [InlineData("florel", "floral")]
+    [InlineData("buterfly", "butterfly")]
+    [InlineData("chirstmas", "christmas")]
+    public void CorrectsTypos(string typo, string expected) =>
+        Assert.Equal(expected, SearchSpellChecker.SuggestCorrections(typo).CorrectedQuery);
+
+    [Fact]
+    public void KnownWordsUnchanged_AndPrefixChips()
+    {
+        var s = SearchSpellChecker.SuggestCorrections("snow");
+        Assert.Null(s.CorrectedQuery);
+        Assert.Contains("snowman", s.Suggestions);
+        Assert.Equal("aurora", SearchSpellChecker.SuggestCorrections("aurorra", new[] { "aurora" }).CorrectedQuery);
+    }
+
+    [Fact]
+    public void TypoSearch_StillFindsPatterns()
+    {
+        using var c = new SqliteCatalogService(Path.Combine(_dir, "c.db"));
+        c.Upsert(new EmbroideryPattern { Title = "Snowman", FilePath = Path.Combine(_dir, "Snowman.pes") });
+        c.Upsert(new EmbroideryPattern { Title = "Track Hoe", FilePath = Path.Combine(_dir, "track_hoe.pes") });
+        var s = new HybridSmartSearchService(c);
+        Assert.Contains(s.Search("wintar"), r => r.Entry.Title == "Snowman");
+        Assert.Contains(s.Search("constrution"), r => r.Entry.Title == "Track Hoe");
+        Assert.Equal("winter", s.Suggest("wintar").CorrectedQuery);
+    }
+}

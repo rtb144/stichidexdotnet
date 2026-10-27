@@ -17,6 +17,10 @@ public sealed class HybridSmartSearchService
     IReadOnlyList<CatalogEntry> _entries = Array.Empty<CatalogEntry>();
     Dictionary<long, (HashSet<string> Tokens, HashSet<int> Concepts, string Text)> _docs = new();
     long _loadedVersion = -1;
+    HashSet<string> _vocab = new(SearchSpellChecker.BaseVocabulary);
+
+    /// <summary>"Did you mean" + completion chips using concept words and this catalog's words.</summary>
+    public SpellSuggestion Suggest(string query) { EnsureIndexMeta(); return SearchSpellChecker.SuggestCorrections(query, _vocab); }
 
     public HybridSmartSearchService(SqliteCatalogService catalog, IEmbeddingProvider? embedder = null)
     { _catalog = catalog; _embedder = embedder ?? new LocalCpuEmbeddingProvider(); }
@@ -62,6 +66,7 @@ public sealed class HybridSmartSearchService
                     var toks = SearchText.SplitCompoundTokens(text).ToHashSet();
                     return (toks, SearchText.Concepts(toks).ToHashSet(), text.ToLowerInvariant());
                 });
+                _vocab = SearchSpellChecker.BuildVocabulary(_docs.Values.SelectMany(d => d.Tokens));
                 foreach (var kv in _catalog.GetAllEmbeddings(_embedder.ModelName)) _vectors[kv.Key] = kv.Value;
                 foreach (var id in _vectors.Keys.Where(k => !_docs.ContainsKey(k)).ToList()) _vectors.TryRemove(id, out _);
                 _loadedVersion = ver;
@@ -90,8 +95,10 @@ public sealed class HybridSmartSearchService
     {
         if (string.IsNullOrWhiteSpace(query)) return Array.Empty<SmartSearchResult>();
         EnsureIndex(ct);
+        var fix = SearchSpellChecker.SuggestCorrections(query, _vocab).CorrectedQuery;
+        if (fix != null) query = query + " " + fix; // typo tolerance: wintar -> wintar winter
         var qToks = SearchText.SplitCompoundTokens(query);
-        var qWords = Regex.Matches(query.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
+        var qWords = Regex.Matches(fix ?? query.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
         var qConcepts = SearchText.Concepts(qToks).ToHashSet();
         var expanded = ExpandQuery(query);
         var qv = _queryCache.GetOrAdd(query.Trim().ToLowerInvariant(), _ => _embedder.Embed(query + " " + expanded));
