@@ -7,7 +7,15 @@ namespace Stitchidex.Desktop.Views;
 
 public partial class MainWindow : Window
 {
-    public MainWindow() => InitializeComponent();
+    public MainWindow()
+    {
+        InitializeComponent();
+        Opened += (_, _) =>
+        {
+            if (DataContext is MainWindowViewModel vm && vm.SelectedPattern == null && vm.Patterns.Count > 0)
+                GridList.SelectedIndex = 0;
+        };
+    }
     MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
 
     async void OnAddFolder(object? s, RoutedEventArgs e)
