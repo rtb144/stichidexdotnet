@@ -1,80 +1,37 @@
-using System.Security.Cryptography;
-using System.Text;
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using Stitchidex.Core.Search;
 namespace Stitchidex.Core.Services;
-
-public interface IEmbeddingProvider
-{
-    string ModelName { get; }
-    int Dimensions { get; }
-    string Status { get; }
-    float[] Embed(string text);
-}
-
-/// <summary>Offline CPU embedder. Uses a deterministic 384-D hashed n-gram projection (bge-small-en-v1.5 compatible dimension) so search works with zero configuration.</summary>
-public sealed class LocalCpuEmbeddingProvider : IEmbeddingProvider
-{
-    public string ModelName => "bge-small-en-v1.5";
-    public int Dimensions => 384;
-    public string Status => "local_cpu ready (offline)";
-
-    public float[] Embed(string text)
-    {
-        var v = new float[Dimensions];
-        var words = Regex.Matches(text.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
-        foreach (var w in words)
-        {
-            Add(v, "w:" + w, 1f);
-            var p = "#" + w + "#";
-            for (int i = 0; i + 3 <= p.Length; i++) Add(v, "t:" + p.Substring(i, 3), 0.5f);
-        }
-        double n = Math.Sqrt(v.Sum(x => (double)x * x));
-        if (n > 0) for (int i = 0; i < v.Length; i++) v[i] = (float)(v[i] / n);
-        return v;
-    }
-
-    void Add(float[] v, string tok, float w)
-    {
-        var h = MD5.HashData(Encoding.UTF8.GetBytes(tok));
-        int idx = (int)(BitConverter.ToUInt32(h, 0) % (uint)Dimensions);
-        v[idx] += (h[4] & 1) == 0 ? w : -w;
-    }
-}
 
 public sealed record SmartSearchResult(CatalogEntry Entry, double Score, double Lexical, double Semantic);
 
+/// <summary>Hybrid lexical + concept + vector search over an in-memory cache (no SQLite reads per keystroke).</summary>
 public sealed class HybridSmartSearchService
 {
     public const double NoiseFloor = 0.22;
-
-    public static readonly IReadOnlyDictionary<string, string[]> ConceptClusters = new Dictionary<string, string[]>
-    {
-        ["florals"] = new[] { "flower", "floral", "rose", "daisy", "tulip", "sunflower", "lily", "bouquet", "garden", "petal", "blossom" },
-        ["animals"] = new[] { "animal", "cat", "dog", "puppy", "kitten", "bird", "owl", "horse", "butterfly", "bunny", "fox", "bear" },
-        ["holidays"] = new[] { "christmas", "xmas", "halloween", "easter", "thanksgiving", "valentine", "santa", "pumpkin", "snowman", "holiday" },
-        ["monograms"] = new[] { "monogram", "alphabet", "letter", "initial", "font", "name", "abc" },
-        ["baby"] = new[] { "baby", "nursery", "bib", "infant", "newborn", "toddler", "kids" },
-        ["quilting"] = new[] { "quilt", "quilting", "block", "applique", "patchwork", "ith" },
-        ["sports"] = new[] { "sport", "football", "baseball", "soccer", "basketball", "golf", "hockey", "team" },
-        ["nautical"] = new[] { "nautical", "anchor", "boat", "ship", "sea", "ocean", "beach", "fish", "shell", "lighthouse" },
-        ["kitchen"] = new[] { "kitchen", "towel", "cook", "food", "fruit", "coffee", "tea", "cupcake", "apron" },
-        ["religious"] = new[] { "cross", "religious", "faith", "church", "angel", "bible", "prayer", "blessed" },
-        ["borders"] = new[] { "border", "frame", "edge", "corner", "lace", "scallop", "trim", "redwork" },
-    };
-
     readonly SqliteCatalogService _catalog;
-    readonly IEmbeddingProvider _embedder;
+    IEmbeddingProvider _embedder;
+    readonly object _lock = new();
+    readonly ConcurrentDictionary<long, float[]> _vectors = new();
+    readonly ConcurrentDictionary<string, float[]> _queryCache = new();
+    IReadOnlyList<CatalogEntry> _entries = Array.Empty<CatalogEntry>();
+    Dictionary<long, (HashSet<string> Tokens, HashSet<int> Concepts, string Text)> _docs = new();
+    long _loadedVersion = -1;
+
     public HybridSmartSearchService(SqliteCatalogService catalog, IEmbeddingProvider? embedder = null)
     { _catalog = catalog; _embedder = embedder ?? new LocalCpuEmbeddingProvider(); }
 
     public string Status => _embedder.Status;
+    public IEmbeddingProvider Embedder => _embedder;
+
+    /// <summary>Swap embedder (e.g. once bge-base finishes downloading); vectors are recomputed lazily.</summary>
+    public void SetEmbedder(IEmbeddingProvider e) { lock (_lock) { _embedder = e; _vectors.Clear(); _queryCache.Clear(); _loadedVersion = -1; } }
 
     public static string ExpandQuery(string q)
     {
-        var words = Regex.Matches(q.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
-        var extra = ConceptClusters.Where(kv => words.Any(w => kv.Key.StartsWith(w) || kv.Value.Contains(w) || kv.Value.Contains(w.TrimEnd('s'))))
-            .SelectMany(kv => kv.Value.Append(kv.Key));
-        return string.Join(" ", words.Concat(extra).Distinct());
+        var toks = SearchText.SplitCompoundTokens(q);
+        var extra = SearchText.Concepts(toks).SelectMany(i => SearchText.Groups[i]);
+        return string.Join(" ", toks.Concat(extra).Distinct());
     }
 
     public static double Cosine(float[] a, float[] b)
@@ -84,34 +41,73 @@ public sealed class HybridSmartSearchService
         return na == 0 || nb == 0 ? 0 : d / Math.Sqrt(na * nb);
     }
 
-    public void IndexEmbeddings()
+    internal static string Doc(CatalogEntry e)
     {
-        foreach (var e in _catalog.All())
-            if (_catalog.GetEmbedding(e.Id, _embedder.ModelName) == null)
-                _catalog.SaveEmbedding(e.Id, _embedder.ModelName, _embedder.Embed(Doc(e)));
+        var card = e.SemanticCard.Contains(" || ") ? e.SemanticCard : SearchText.BuildCard(e.Title, e.Path, Array.Empty<string>(), e.Tags, e.Notes);
+        return $"{card} {string.Join(' ', e.Tags)} {e.Notes}";
     }
 
-    static string Doc(CatalogEntry e) => $"{e.Title} {e.SemanticCard} {string.Join(' ', e.Tags)}";
+    /// <summary>Refresh in-memory cache if catalog changed; embeds missing docs. Safe to call from a background thread.</summary>
+    public void EnsureIndex(CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            var ver = _catalog.Version;
+            if (ver != _loadedVersion)
+            {
+                _entries = _catalog.All();
+                _docs = _entries.ToDictionary(e => e.Id, e =>
+                {
+                    var text = Doc(e);
+                    var toks = SearchText.SplitCompoundTokens(text).ToHashSet();
+                    return (toks, SearchText.Concepts(toks).ToHashSet(), text.ToLowerInvariant());
+                });
+                foreach (var kv in _catalog.GetAllEmbeddings(_embedder.ModelName)) _vectors[kv.Key] = kv.Value;
+                foreach (var id in _vectors.Keys.Where(k => !_docs.ContainsKey(k)).ToList()) _vectors.TryRemove(id, out _);
+                _loadedVersion = ver;
+            }
+            var missing = _entries.Where(e => !_vectors.ContainsKey(e.Id)).ToList();
+            foreach (var e in missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                var v = _embedder.Embed(Doc(e));
+                _vectors[e.Id] = v;
+                _catalog.SaveEmbedding(e.Id, _embedder.ModelName, v);
+            }
+            if (missing.Count > 0) _loadedVersion = _catalog.Version; // our own SaveEmbedding writes don't invalidate
+        }
+    }
 
-    public IReadOnlyList<SmartSearchResult> Search(string query, int limit = 100)
+    public IReadOnlyList<CatalogEntry> Entries { get { EnsureIndexMeta(); return _entries; } }
+    void EnsureIndexMeta() { if (_catalog.Version != _loadedVersion) EnsureIndex(); }
+
+    public void IndexEmbeddings() => EnsureIndex();
+
+    public Task<IReadOnlyList<SmartSearchResult>> SearchAsync(string query, int limit = 500, CancellationToken ct = default) =>
+        Task.Run(() => Search(query, limit, ct), ct);
+
+    public IReadOnlyList<SmartSearchResult> Search(string query, int limit = 500, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query)) return Array.Empty<SmartSearchResult>();
-        IndexEmbeddings();
-        var expanded = ExpandQuery(query);
-        var qv = _embedder.Embed(expanded);
+        EnsureIndex(ct);
+        var qToks = SearchText.SplitCompoundTokens(query);
         var qWords = Regex.Matches(query.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToList();
-        var fts = _catalog.FullTextSearch(expanded).Select(h => h.Id).ToHashSet();
+        var qConcepts = SearchText.Concepts(qToks).ToHashSet();
+        var expanded = ExpandQuery(query);
+        var qv = _queryCache.GetOrAdd(query.Trim().ToLowerInvariant(), _ => _embedder.Embed(query + " " + expanded));
+        if (_queryCache.Count > 256) _queryCache.Clear();
         var results = new List<SmartSearchResult>();
-        foreach (var e in _catalog.All())
+        foreach (var e in _entries)
         {
-            var title = e.Title.ToLowerInvariant();
-            double lex = (fts.Contains(e.Id) ? 0.15 : 0)
-                       + (qWords.Count > 0 ? 0.35 * qWords.Count(w => title.Contains(w)) / qWords.Count : 0)
-                       + (qWords.Any(w => e.Tags.Contains(w)) ? 0.15 : 0);
-            var ev = _catalog.GetEmbedding(e.Id, _embedder.ModelName) ?? _embedder.Embed(Doc(e));
-            double sem = Math.Max(0, Cosine(qv, ev));
-            double score = Math.Min(1.0, 0.6 * sem + lex);
-            if (score >= NoiseFloor) results.Add(new SmartSearchResult(e, score, lex, sem));
+            ct.ThrowIfCancellationRequested();
+            var d = _docs[e.Id];
+            double wordHit = qWords.Count == 0 ? 0 : qWords.Count(w => d.Tokens.Contains(w) || d.Tokens.Contains(w.TrimEnd('s')) || (w.Length >= 4 && d.Text.Contains(w))) / (double)qWords.Count;
+            double titleHit = qWords.Count == 0 ? 0 : qWords.Count(w => e.Title.Contains(w, StringComparison.OrdinalIgnoreCase)) / (double)qWords.Count;
+            double concept = qConcepts.Count == 0 ? 0 : qConcepts.Count(c => d.Concepts.Contains(c)) / (double)qConcepts.Count;
+            double lex = 0.30 * wordHit + 0.15 * titleHit + 0.30 * concept;
+            double sem = _vectors.TryGetValue(e.Id, out var ev) ? Math.Max(0, Cosine(qv, ev)) : 0;
+            double score = Math.Min(1.0, 0.45 * sem + lex);
+            if (score >= NoiseFloor && (lex > 0 || sem >= 0.55)) results.Add(new SmartSearchResult(e, score, lex, sem));
         }
         return results.OrderByDescending(r => r.Score).Take(limit).ToList();
     }

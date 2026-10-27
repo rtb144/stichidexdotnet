@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Stitchidex.Core.Models;
 using Stitchidex.Core.Parsers;
 using Stitchidex.Core.Rendering;
+using Stitchidex.Core.Search;
 namespace Stitchidex.Core.Services;
 
 public sealed record CatalogEntry(long Id, string Path, string Title, string FormatFamily, int StitchCount, int ColorCount,
@@ -40,10 +41,15 @@ public sealed class SqliteCatalogService : IDisposable
         PurgeNonPatternRecords();
     }
 
+    long _version;
+    /// <summary>Incremented on every write; lets search caches invalidate cheaply.</summary>
+    public long Version => Interlocked.Read(ref _version);
+
     int Exec(string sql, params (string, object?)[] ps)
     {
         lock (_gate)
         {
+        Interlocked.Increment(ref _version);
         using var c = _db.CreateCommand(); c.CommandText = sql; c.Transaction = _tx;
         foreach (var (k, v) in ps) c.Parameters.AddWithValue(k, v ?? DBNull.Value);
         return c.ExecuteNonQuery();
@@ -134,13 +140,56 @@ public sealed class SqliteCatalogService : IDisposable
             return files.Count == 0 ? 0 : IndexFiles(files, progress, ct, true);
         }, ct);
 
-    public void Upsert(EmbroideryPattern p) => Exec(@"INSERT INTO patterns(path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags,palette,jump_count,trim_count)
+    public void Upsert(EmbroideryPattern p)
+    {
+        var full = System.IO.Path.GetFullPath(p.FilePath);
+        var labels = p.Tags.Where(t => t.StartsWith("pec:")).Select(t => t[4..]).ToList();
+        var tags = p.Tags.Where(t => !t.Contains(':')).ToList();
+        var card = SearchText.BuildCard(p.Title, full, labels, tags);
+        Exec("DELETE FROM embeddings WHERE pattern_id=(SELECT id FROM patterns WHERE path=$p)", ("$p", full));
+        Exec(@"INSERT INTO patterns(path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,thumbnail,semantic_card,tags,palette,jump_count,trim_count)
         VALUES($p,$t,$f,$s,$c,$w,$h,$hc,$th,$sc,$tg,$pl,$j,$tr)
         ON CONFLICT(path) DO UPDATE SET title=$t,format_family=$f,stitch_count=$s,color_count=$c,width_mm=$w,height_mm=$h,hoop_category=$hc,thumbnail=$th,semantic_card=$sc,palette=$pl,jump_count=$j,trim_count=$tr",
-        ("$p", System.IO.Path.GetFullPath(p.FilePath)), ("$t", p.Title), ("$f", p.FormatFamily), ("$s", p.StitchCount), ("$c", p.Colors.Count),
-        ("$w", p.WidthMm), ("$h", p.HeightMm), ("$hc", p.HoopCategory), ("$th", p.PngThumbnail), ("$sc", p.SemanticCard),
-        ("$tg", JsonSerializer.Serialize(p.Tags.Where(t => !t.Contains(':')).ToList())),
+        ("$p", full), ("$t", p.Title), ("$f", p.FormatFamily), ("$s", p.StitchCount), ("$c", p.Colors.Count),
+        ("$w", p.WidthMm), ("$h", p.HeightMm), ("$hc", p.HoopCategory), ("$th", p.PngThumbnail), ("$sc", card),
+        ("$tg", JsonSerializer.Serialize(tags)),
         ("$pl", JsonSerializer.Serialize(p.Colors.Select(c => c.Hex).ToList())), ("$j", p.JumpCount), ("$tr", p.TrimCount));
+    }
+
+    /// <summary>Upgrades old rows: rebuilds semantic cards with folder context + PEC header label (no DB delete needed).</summary>
+    public int BackfillSemanticCards()
+    {
+        int n = 0;
+        var rows = Query("SELECT id,path,title,format_family,stitch_count,color_count,width_mm,height_mm,hoop_category,NULL AS thumbnail,semantic_card,tags,notes,palette,jump_count,trim_count FROM patterns WHERE semantic_card IS NULL OR instr(semantic_card,' || ')=0");
+        InTransaction(() =>
+        {
+            foreach (var e in rows)
+            {
+                var label = SearchText.ReadPecLabel(e.Path);
+                var card = SearchText.BuildCard(e.Title, e.Path, label is null ? Array.Empty<string>() : new[] { label }, e.Tags, e.Notes);
+                Exec("UPDATE patterns SET semantic_card=$c WHERE id=$i", ("$c", card), ("$i", e.Id));
+                Exec("DELETE FROM embeddings WHERE pattern_id=$i", ("$i", e.Id));
+                n++;
+            }
+        });
+        if (n > 0) ReindexFts();
+        return n;
+    }
+
+    /// <summary>All stored vectors for a model in one query.</summary>
+    public Dictionary<long, float[]> GetAllEmbeddings(string model)
+    {
+        lock (_gate)
+        {
+            using var c = _db.CreateCommand(); c.Transaction = _tx;
+            c.CommandText = "SELECT pattern_id, vector FROM embeddings WHERE model=$m";
+            c.Parameters.AddWithValue("$m", model);
+            var d = new Dictionary<long, float[]>();
+            using var r = c.ExecuteReader();
+            while (r.Read()) { var b = (byte[])r[1]; var v = new float[b.Length / 4]; Buffer.BlockCopy(b, 0, v, 0, b.Length); d[r.GetInt64(0)] = v; }
+            return d;
+        }
+    }
 
     public int RemoveDirectoryRecords(string folder)
     {

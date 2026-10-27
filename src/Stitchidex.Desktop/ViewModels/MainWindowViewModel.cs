@@ -115,11 +115,26 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _catalog = new SqliteCatalogService(dbPath);
         _catalog.RepairTruncatedTitles();
-        _smart = new HybridSmartSearchService(_catalog);
+        _catalog.BackfillSemanticCards();
+        _smart = new HybridSmartSearchService(_catalog, BlendedEmbeddingProvider.CreateDefault());
         SelectedPatterns.CollectionChanged += (_, _) => OnPropertyChanged(nameof(TagSelectedLabel));
         foreach (var f in _catalog.All().Select(e => Path.GetDirectoryName(e.Path) ?? "").Distinct().OrderBy(x => x)) Folders.Add(f);
         Reload();
         _ = RepairThumbnailsAsync();
+        _ = InitNeuralModelAsync();
+    }
+
+    /// <summary>Background: fetch bge-base-en-v1.5 if missing, swap it in, pre-embed catalog off the UI thread.</summary>
+    async Task InitNeuralModelAsync()
+    {
+        try
+        {
+            if (_smart.Embedder is not BlendedEmbeddingProvider && await OnnxBgeEmbeddingProvider.EnsureDownloadedAsync())
+                _smart.SetEmbedder(await Task.Run(() => BlendedEmbeddingProvider.CreateDefault()));
+            await Task.Run(() => _smart.EnsureIndex());
+            OnPropertyChanged(nameof(SmartSearchPill)); OnPropertyChanged(nameof(SmartStatus));
+        }
+        catch (Exception ex) { StatusMessage = "Smart search model: " + ex.Message; }
     }
 
     partial void OnMaxStitchesTextChanged(string value) => Reload();
@@ -158,7 +173,7 @@ public partial class MainWindowViewModel : ObservableObject
         foreach (var f in Folders.ToList()) await AddFolderAsync(f);
     }
 
-    partial void OnSearchTextChanged(string value) => Reload();
+    partial void OnSearchTextChanged(string value) => Reload(debounceMs: 150);
     partial void OnSmartSearchEnabledChanged(bool value) { OnPropertyChanged(nameof(SmartSearchPill)); Reload(); }
     partial void OnSelectedFormatChanged(string value) => Reload();
     partial void OnSelectedHoopChanged(string value) => Reload();
@@ -175,28 +190,56 @@ public partial class MainWindowViewModel : ObservableObject
         foreach (var v in values) if (!col.Contains(v)) col.Add(v);
     }
 
-    public void Reload()
+    CancellationTokenSource? _searchCts;
+    readonly Dictionary<long, PatternItemViewModel> _vmCache = new();
+
+    /// <summary>Debounced, cancellable search on a background thread; only the final list is applied on the UI thread.</summary>
+    public void Reload(int debounceMs = 0) => _ = ReloadAsync(debounceMs);
+
+    public async Task ReloadAsync(int debounceMs = 0)
     {
-        IEnumerable<CatalogEntry> items = string.IsNullOrWhiteSpace(SearchText)
-            ? _catalog.All()
-            : SmartSearchEnabled ? _smart.Search(SearchText).Select(r => r.Entry) : _catalog.Search(SearchText);
-        var all = _catalog.All();
-        Sync(FormatFamilies, all.Select(e => e.FormatFamily).Distinct().OrderBy(x => x));
-        Sync(HoopCategories, all.Select(e => e.HoopCategory).Distinct().OrderBy(x => x));
-        Sync(CraftTags, _catalog.GetAllCraftTags());
-        if (SelectedFolder != null) items = items.Where(e => e.Path.StartsWith(SelectedFolder, StringComparison.Ordinal));
-        if (SelectedFormat != AllOption) items = items.Where(e => e.FormatFamily == SelectedFormat);
-        if (SelectedHoop != AllOption) items = items.Where(e => e.HoopCategory == SelectedHoop);
-        if (SelectedCraftTag != AllOption) items = items.Where(e => e.Tags.Contains(SelectedCraftTag));
-        if (int.TryParse(MaxStitchesText.Replace(",", ""), out var ms) && ms > 0) items = items.Where(e => e.StitchCount <= ms);
-        if (int.TryParse(MaxColorsText, out var mc) && mc > 0) items = items.Where(e => e.ColorCount <= mc);
-        var keep = SelectedPattern?.Id;
-        Patterns.Clear();
-        foreach (var e in items) Patterns.Add(new PatternItemViewModel(e));
-        SelectedPattern = (keep != null ? Patterns.FirstOrDefault(p => p.Id == keep) : null) ?? Patterns.FirstOrDefault();
-        OnPropertyChanged(nameof(PatternsFoundText));
-        OnPropertyChanged(nameof(SmartSearchPill));
-        StatusMessage = $"{Patterns.Count} patterns";
+        _searchCts?.Cancel();
+        var cts = _searchCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        var q = SearchText; var smart = SmartSearchEnabled; var folder = SelectedFolder; var fmt = SelectedFormat;
+        var hoop = SelectedHoop; var craft = SelectedCraftTag; var msT = MaxStitchesText; var mcT = MaxColorsText;
+        try
+        {
+            if (debounceMs > 0) await Task.Delay(debounceMs, ct);
+            var (items, all, craftTags) = await Task.Run(() =>
+            {
+                var all = _smart.Entries;
+                IEnumerable<CatalogEntry> items = string.IsNullOrWhiteSpace(q) ? all
+                    : smart ? _smart.Search(q, 5000, ct).Select(r => r.Entry)
+                    : _catalog.FullTextSearch(q, 5000).Select(h => h.Id).ToHashSet() is var ids ? all.Where(e => ids.Contains(e.Id)) : all;
+                if (folder != null) items = items.Where(e => e.Path.StartsWith(folder, StringComparison.Ordinal));
+                if (fmt != AllOption) items = items.Where(e => e.FormatFamily == fmt);
+                if (hoop != AllOption) items = items.Where(e => e.HoopCategory == hoop);
+                if (craft != AllOption) items = items.Where(e => e.Tags.Contains(craft));
+                if (int.TryParse(msT.Replace(",", ""), out var ms) && ms > 0) items = items.Where(e => e.StitchCount <= ms);
+                if (int.TryParse(mcT, out var mc) && mc > 0) items = items.Where(e => e.ColorCount <= mc);
+                var list = items.ToList();
+                ct.ThrowIfCancellationRequested();
+                return (list, all, all.SelectMany(e => e.Tags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList());
+            }, ct);
+            if (ct.IsCancellationRequested) return;
+            Sync(FormatFamilies, all.Select(e => e.FormatFamily).Distinct().OrderBy(x => x));
+            Sync(HoopCategories, all.Select(e => e.HoopCategory).Distinct().OrderBy(x => x));
+            Sync(CraftTags, craftTags);
+            var keep = SelectedPattern?.Id;
+            Patterns.Clear();
+            foreach (var e in items)
+            {
+                if (_vmCache.TryGetValue(e.Id, out var vm)) { if (!ReferenceEquals(vm.Entry, e) && vm.Entry != e) vm.Refresh(e); }
+                else _vmCache[e.Id] = vm = new PatternItemViewModel(e);
+                Patterns.Add(vm);
+            }
+            SelectedPattern = (keep != null ? Patterns.FirstOrDefault(p => p.Id == keep) : null) ?? Patterns.FirstOrDefault();
+            OnPropertyChanged(nameof(PatternsFoundText));
+            OnPropertyChanged(nameof(SmartSearchPill));
+            StatusMessage = $"{Patterns.Count} patterns";
+        }
+        catch (OperationCanceledException) { }
     }
 
     public void AddFolder(string path) => _ = AddFolderAsync(path);

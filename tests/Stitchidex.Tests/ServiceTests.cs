@@ -92,15 +92,15 @@ public class ServiceTests : IDisposable
     {
         using var c = Seed();
         var s = new HybridSmartSearchService(c);
-        Assert.Equal(11, HybridSmartSearchService.ConceptClusters.Count);
-        Assert.Contains("offline", s.Status);
+        Assert.True(Stitchidex.Core.Search.SearchText.ConceptGroups.Length >= 16);
+        Assert.Contains("concept", s.Status);
         var r = s.Search("flowers");
         Assert.NotEmpty(r);
         Assert.Equal("spring rose bouquet", r[0].Entry.Title);
         Assert.All(r, x => Assert.True(x.Score >= HybridSmartSearchService.NoiseFloor));
         Assert.Equal("sailboat anchor", s.Search("nautical boat")[0].Entry.Title);
         Assert.Empty(s.Search("zzzqqq"));
-        Assert.Equal(384, new LocalCpuEmbeddingProvider().Embed("rose").Length);
+        Assert.Equal(768, new LocalCpuEmbeddingProvider().Embed("rose").Length);
     }
 
     [Theory]
